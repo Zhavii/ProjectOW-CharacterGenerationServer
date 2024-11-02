@@ -34,8 +34,8 @@ const getAvatar = async (req, res) => {
         return res.status(404).send('User not found.')
     }
 
-    const hash = xxHash32(JSON.stringify(user.customization, Object.keys(user.customization).sort()), 0).toString()
-    if (user.customizationHash == hash) {
+    const hash = xxHash32(JSON.stringify(user.customization), 0).toString()
+    if (user.customizationHash === hash) {
         try {
             const avatarsDir = path.join(process.cwd(), 'avatars', `${user.username}.webp`)
             const buffer = await fs.promises.readFile(avatarsDir)
@@ -182,8 +182,7 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(tattoosLegLeft, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (eyes)
             ctx.drawImage(eyes, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (hair)
-        {
+        if (hair) {
             if (hat)
             {
                 let hairWithoutHat = await removePixelsByImage(hair, hat)
@@ -209,8 +208,11 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(nose, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (mouth)
             ctx.drawImage(mouth, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (hat && !hair)
-            ctx.drawImage(hat, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (hat && !hair) {
+            let hatWithoutMask = await removePixelsByColor(hat)
+            hatWithoutMask = await loadImage(hatWithoutMask)
+            ctx.drawImage(hatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        }
         if (piercings)
             ctx.drawImage(piercings, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (glasses)
