@@ -102,12 +102,7 @@ const createAvatarThumbnail = async (user) => {
 
         let generatedClothing = await generateAvatar(2550, 850, 0, 0, 2550, 850, null, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
         let generatedSpriteSheet = await addClothingToAvatar(base, generatedClothing)
-        let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
         let generatedAvatar = await cropImage(generatedSpriteSheet, 0, 0, 425, 850)
-
-        user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-        user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-        //user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, undefined, undefined, user.username)
 
         try {
             const avatarsDir = path.join(process.cwd(), 'avatars')
@@ -118,8 +113,13 @@ const createAvatarThumbnail = async (user) => {
         catch (error) {
             console.error('Error saving avatar:', error)
         }
-
         resolve(generatedAvatar)
+
+        // we generate this afterwards because we don't want to keep the client waiting
+        let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
+        user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+        user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+        //user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, undefined, undefined, user.username)
     })
 }
 
