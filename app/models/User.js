@@ -27,6 +27,7 @@ const userSchema = new mongoose.Schema({
     sessionExpire: { type: Date },
     resetLink: { type: String, default: '' },
 
+    customizationHash: { type: String, default: '' },
     customization: {
         nametagColor: { type: String, default: '' },
         isMale: { type: Boolean, default: false },

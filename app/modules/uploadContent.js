@@ -1,9 +1,10 @@
-const { v4: uuid } = require('uuid')
-const multer = require('multer')
+import { v4 as uuid } from 'uuid'
+import multer from 'multer'
+import aws from 'aws-sdk'
+import sharp from 'sharp'
+import path from 'path'
+
 const upload = multer({ storage: multer.memoryStorage() })
-const aws = require('aws-sdk')
-const sharp = require('sharp')
-const path = require('path')
 
 const s3 = new aws.S3({
     endpoint: new aws.Endpoint(process.env.DO_ENDPOINT),
@@ -21,7 +22,7 @@ const s3 = new aws.S3({
  * @param {string} fileName - The custom filename to be used.
  * @returns {Promise<string|undefined>} The new filename if successful, otherwise undefined.
  */
-module.exports = (previousMedia, file, location, maxSize, resizePixels, errors, fileName) => {
+const uploadImage = (previousMedia, file, location, maxSize, resizePixels, errors, fileName) => {
     if (file.size / 1024 / 1024 > maxSize) {
         if (errors) {
             errors.push({ msg: 'File too large.' })
@@ -60,3 +61,5 @@ module.exports = (previousMedia, file, location, maxSize, resizePixels, errors, 
         resolve(uploadDone.Key)
     })
 }
+
+export default uploadImage
