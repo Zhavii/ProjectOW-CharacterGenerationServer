@@ -35,4 +35,4 @@ app.get('/', (req, res) => res.send('it works! :D'))
 
 import api from './modules/api.js'
 app.get('/avatar/:username/:type/image.webp', async (req, res) => api.getAvatar(req, res))
-app.get('/download/webp/:hash', async (req, res) => api.download(req, res))
+//app.get('/download/webp/:hash', async (req, res) => api.download(req, res))
