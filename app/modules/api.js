@@ -24,7 +24,6 @@ const isColorSimilar = (r1, g1, b1, r2, g2, b2) => {
 }
 
 const getAvatar = async (req, res) => {
-    const type = req.params.type
     const username = req.params.username
     let user = await User.findOne({ username: username }, 'username customization customizationHash')
     if (!user) {
@@ -34,11 +33,6 @@ const getAvatar = async (req, res) => {
     const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
     let file = `${hash}.webp`
-    if (type === 'thumbnail')
-        file = `${hash}_thumbnail.webp`
-    else if (type === 'sprite')
-        file = `${hash}_spritesheet.webp`
-
     if (user.customizationHash === hash) {
         try {
             const avatarsDir = path.join(process.cwd(), 'avatars', file)
@@ -53,7 +47,7 @@ const getAvatar = async (req, res) => {
     }
 
     //user = user = await User.findOne({ username: username }, 'username customization customizationHash')
-    const generatedAvatar = await createAvatarThumbnail(user, hash, type)
+    const generatedAvatar = await createAvatarThumbnail(user, hash)
     user.customizationHash = hash
     res.status(200).send(generatedAvatar) //.redirect(`/download/webp/${hash}`)
     user.save()
@@ -72,7 +66,7 @@ const download = async (req, res) => {
 }
 */
 
-const createAvatarThumbnail = async (user, hash, getType) => {
+const createAvatarThumbnail = async (user, hash) => {
     return new Promise(async (resolve, reject) => {
         let base = ''
         if (user.customization.isMale && user.customization.bodyType == 0)
@@ -151,12 +145,7 @@ const createAvatarThumbnail = async (user, hash, getType) => {
         }
 
         // return/resolve early so that we don't make the client wait
-        if (getType === 'thumbnail')
-            resolve(generatedThumbnail)
-        else if (getType === 'sprite')
-            resolve(generatedSpriteSheet)
-        else
-            resolve(generatedAvatar)
+        resolve(generatedAvatar)
 
         // we generate this afterwards because we don't want to keep the client waiting
         let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
