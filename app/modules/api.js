@@ -48,7 +48,7 @@ const getAvatar = async (req, res) => {
         const username = req.params.username
         
         // Find user with minimal projection
-        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail', { lean: true })
+        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true })
         
         if (!user) {
             return res.status(404).send('User not found.')
@@ -93,7 +93,7 @@ const getAvatar = async (req, res) => {
         if (user.customizationHash !== hash) {
             User.updateOne(
                 { username }, 
-                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail },
+                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
                 { timestamps: false } // Disable automatic timestamp updates
             ).catch(console.error)
         }
@@ -178,6 +178,7 @@ const createAvatarThumbnail = async (user, hash) => {
         let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
         user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
         user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+        user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, "DONT", undefined, user.username)
     })
 }
 
