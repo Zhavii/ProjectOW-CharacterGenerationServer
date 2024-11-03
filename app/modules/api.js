@@ -32,7 +32,6 @@ const getAvatar = async (req, res) => {
     const type = req.params.type
     const username = req.params.username
     const user = await User.findOne({ username: username }, 'username customization customizationHash')
-    console.log(user)
     if (!user) {
         return res.status(404).send('User not found.')
     }
