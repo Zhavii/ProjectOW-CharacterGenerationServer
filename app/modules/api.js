@@ -50,7 +50,7 @@ const getAvatar = async (req, res) => {
             //const buffer = await fs.promises.readFile(avatarsDir)
             //return res.status(200).send(buffer)
             await fs.promises.access(path.join(process.cwd(), 'avatars', file))
-            return res.redirect(`/download/${hash}/image.webp`)
+            return res.redirect(`/download/webp/${hash}`)
         }
         catch (error) {
             console.error('Error saving avatar:', error)
@@ -59,12 +59,11 @@ const getAvatar = async (req, res) => {
 
     const generatedAvatar = await createAvatarThumbnail(user, hash, type)
     user.customizationHash = hash
-    res.status(200).redirect(`/download/${hash}/image.webp`)//.send(generatedAvatar)
+    res.status(200).redirect(`/download/webp/${hash}`)//.send(generatedAvatar)
     user.save()
 }
 
 const download = async (req, res) => {
-    console.log(req.params.hash)
     try {
         const avatarsDir = path.join(process.cwd(), 'avatars', `${req.params.hash}.webp`)
         const buffer = await fs.promises.readFile(avatarsDir)
