@@ -38,8 +38,6 @@ const getAvatar = async (req, res) => {
             const avatarsDir = path.join(process.cwd(), 'avatars', file)
             const buffer = await fs.readFile(avatarsDir)
             return res.status(200).send(buffer)
-            //await fs.access(path.join(process.cwd(), 'avatars', file))
-            //return res.redirect(`/download/webp/${hash}`)
         }
         catch (error) {
             console.error('Avatar not found')
@@ -52,19 +50,6 @@ const getAvatar = async (req, res) => {
     res.status(200).send(generatedAvatar) //.redirect(`/download/webp/${hash}`)
     user.save()
 }
-
-/*
-const download = async (req, res) => {
-    try {
-        const avatarsDir = path.join(process.cwd(), 'avatars', `${req.params.hash}.webp`)
-        const buffer = await fs.readFile(avatarsDir)
-        return res.status(200).send(buffer)
-    }
-    catch (error) {
-        console.error('Error saving avatar:', error)
-    }
-}
-*/
 
 const createAvatarThumbnail = async (user, hash) => {
     return new Promise(async (resolve, reject) => {
@@ -117,15 +102,8 @@ const createAvatarThumbnail = async (user, hash) => {
         let tattoosLegRight = await getImage(user.customization.tattoos.legRight)
         let tattoosLegLeft = await getImage(user.customization.tattoos.legLeft)
     
-        //let generatedThumbnail = await generateAvatar(256, 256, 103, 42, 218, 218, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
-        //let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
-        //let generatedClothing = await generateAvatar(2550, 850, 0, 0, 2550, 850, null, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
-
-        //let generatedSpriteSheet = await addClothingToAvatar(base, generatedClothing)
         let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
         generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
-        //generatedThumbnail = await sharp(generatedThumbnail).webp({ quality: 80 }).toBuffer()
-        //generatedSpriteSheet = await sharp(generatedSpriteSheet).webp({ quality: 100 }).toBuffer()
 
         try {
             const avatarsDir = path.join(process.cwd(), 'avatars')
@@ -133,12 +111,6 @@ const createAvatarThumbnail = async (user, hash) => {
 
             let filePath = path.join(avatarsDir, `${hash}.webp`)
             await fs.writeFile(filePath, generatedAvatar)
-
-            //filePath = path.join(avatarsDir, `${hash}_thumbnail.webp`)
-            //await fs.writeFile(filePath, generatedThumbnail)
-
-            //filePath = path.join(avatarsDir, `${hash}_spritesheet.webp`)
-            //await fs.writeFile(filePath, generatedSpriteSheet)
         }
         catch (error) {
             console.error('Error saving avatar:', error)
@@ -152,7 +124,6 @@ const createAvatarThumbnail = async (user, hash) => {
         let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
         user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
         user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-        //user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, undefined, undefined, user.username)
     })
 }
 
@@ -401,21 +372,6 @@ async function removePixelsByColor(sourceImage) {
     }
     catch (error) {
         console.error('Error processing images:', error);
-        throw error
-    }
-}
-
-async function addClothingToAvatar(base, clothing) {
-    try {
-        clothing = await loadImage(clothing)
-        const canvas = createCanvas(base.width, base.height)
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(base, 0, 0, canvas.width, canvas.height)
-        ctx.drawImage(clothing, 0, 0, canvas.width, canvas.height)
-        return canvas.toBuffer()
-    }
-    catch (error) {
-        console.error('Error processing images:', error)
         throw error
     }
 }
