@@ -56,6 +56,8 @@ const getAvatar = async (req, res) => {
         }
     }
 
+    res.set('Cache-Control', 'no-cache, must-revalidate')
+    res.set('Last-Modified', new Date().toUTCString())
     const avatar = await createAvatarThumbnail(user, hash, type)
     user.customizationHash = hash
     await user.save()
