@@ -49,7 +49,6 @@ const getAvatar = async (req, res) => {
         
         // Find user with minimal projection
         const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail', { lean: true })
-        console.log(user)
         
         if (!user) {
             return res.status(404).send('User not found.')
@@ -58,17 +57,17 @@ const getAvatar = async (req, res) => {
         // Calculate hash only once
         const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
+        // First check memory cache using username as key
+        const cachedAvatar = avatarCache.get(hash)
+        if (cachedAvatar) {
+            return res.status(200).send(cachedAvatar)
+        }
+
         // Check if file exists without loading it first
         const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)
         
         try {
             if (user.customizationHash === hash) {
-                // First check memory cache using username as key
-                const cachedAvatar = avatarCache.get(username)
-                if (cachedAvatar) {
-                    return res.status(200).send(cachedAvatar)
-                }
-
                 const stats = await fs.stat(avatarPath)
                 if (stats.isFile()) {
                     // Stream the file instead of loading into memory
@@ -85,7 +84,7 @@ const getAvatar = async (req, res) => {
         const generatedAvatar = await createAvatarThumbnail(user, hash)
         
         // Update cache and hash
-        avatarCache.set(username, generatedAvatar)
+        avatarCache.set(hash, generatedAvatar)
         
         // Send response immediately
         res.status(200).send(generatedAvatar)
@@ -335,100 +334,101 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
     })
 }
 
-// Process a chunk of pixels
-const processPixelChunk = (sourceData, start, end, maskData = null) => {
-    for (let i = start; i < end; i += 4) {
-        if (maskData) {
-            // Using mask image logic
-            const maskR = maskData[i]
-            const maskG = maskData[i + 1]
-            const maskB = maskData[i + 2]
-            const maskA = maskData[i + 3]
-
-            // If mask pixel is opaque and matches our target color
-            if (maskA === 255 && isColorSimilar(maskR, maskG, maskB)) {
-                // Make the corresponding source pixel transparent
-                sourceData[i + 3] = 0
+// Optimized pixel processing with TypedArray and direct buffer access
+const processPixels = (sourceData, start, end, maskData = null) => {
+    // Process in larger steps for better memory access patterns
+    const step = 4 * 32 // Process 32 pixels at a time
+    
+    if (maskData) {
+        for (let i = start; i < end; i += step) {
+            const blockEnd = Math.min(i + step, end)
+            for (let j = i; j < blockEnd; j += 4) {
+                // Check alpha first as it's most likely to early-exit
+                if (maskData[j + 3] === 255) {
+                    // Group color checks to allow for better branch prediction
+                    const r = maskData[j]
+                    const g = maskData[j + 1]
+                    const b = maskData[j + 2]
+                    
+                    // Check green first as it has the largest tolerance
+                    if (g >= gMin && g <= gMax && 
+                        r >= rMin && r <= rMax && 
+                        b >= bMin && b <= bMax) {
+                        sourceData[j + 3] = 0
+                    }
+                }
             }
-        } else {
-            // Direct color removal logic
-            const sourceA = sourceData[i + 3]
-            if (sourceA === 255) {
-                const sourceR = sourceData[i]
-                const sourceG = sourceData[i + 1]
-                const sourceB = sourceData[i + 2]
-
-                if (isColorSimilar(sourceR, sourceG, sourceB)) {
-                    sourceData[i + 3] = 0
+        }
+    } else {
+        for (let i = start; i < end; i += step) {
+            const blockEnd = Math.min(i + step, end)
+            for (let j = i; j < blockEnd; j += 4) {
+                if (sourceData[j + 3] === 255) {
+                    const r = sourceData[j]
+                    const g = sourceData[j + 1]
+                    const b = sourceData[j + 2]
+                    
+                    if (g >= gMin && g <= gMax && 
+                        r >= rMin && r <= rMax && 
+                        b >= bMin && b <= bMax) {
+                        sourceData[j + 3] = 0
+                    }
                 }
             }
         }
     }
 }
 
-// Get optimal chunk size based on image size and CPU cores
-const getChunkSize = (totalPixels) => {
-    const cpuCount = os.cpus().length
-    return Math.ceil(totalPixels / (cpuCount * 4)) * 4
-}
-
 async function removePixelsByImage(sourceImagePath, maskImagePath) {
     try {
-        // Load both images
+        // Input validation
         let sourceImage = sourceImagePath
         let maskImage = maskImagePath
 
-        // Validate images
         if (!sourceImage || !maskImage || 
             sourceImage.width !== maskImage.width || 
             sourceImage.height !== maskImage.height) {
             throw new Error('Invalid or mismatched image dimensions')
         }
 
-        // Create canvases
-        let sourceCanvas = createCanvas(sourceImage.width, sourceImage.height)
-        let maskCanvas = createCanvas(maskImage.width, maskImage.height)
+        // Create and setup canvases with optimized settings
+        const width = sourceImage.width
+        const height = sourceImage.height
+        const sourceCanvas = createCanvas(width, height)
+        const maskCanvas = createCanvas(width, height)
         
-        let sourceCtx = sourceCanvas.getContext('2d')
-        let maskCtx = maskCanvas.getContext('2d')
+        const sourceCtx = sourceCanvas.getContext('2d', { alpha: true })
+        const maskCtx = maskCanvas.getContext('2d', { alpha: true })
 
-        // Draw images
+        // Draw images with optimized settings
+        sourceCtx.imageSmoothingEnabled = false
+        maskCtx.imageSmoothingEnabled = false
+        
         sourceCtx.drawImage(sourceImage, 0, 0)
         maskCtx.drawImage(maskImage, 0, 0)
 
-        // Get image data
-        let sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
-        let maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height)
+        // Get image data using optimized data structures
+        const sourceImageData = sourceCtx.getImageData(0, 0, width, height)
+        const maskImageData = maskCtx.getImageData(0, 0, width, height)
 
-        const totalPixels = sourceImageData.data.length
-        const chunkSize = getChunkSize(totalPixels)
-        const chunks = Math.ceil(totalPixels / chunkSize)
-
-        // Process chunks in parallel
-        const promises = []
-        for (let i = 0; i < chunks; i++) {
-            const start = i * chunkSize
-            const end = Math.min(start + chunkSize, totalPixels)
-            promises.push(
-                new Promise((resolve) => {
-                    processPixelChunk(
-                        sourceImageData.data,
-                        start,
-                        end,
-                        maskImageData.data
-                    )
-                    resolve()
-                })
+        // Process pixels in optimal chunks
+        const totalPixels = width * height * 4
+        const blockSize = 32768 // Process in 32KB blocks for cache efficiency
+        
+        for (let start = 0; start < totalPixels; start += blockSize) {
+            const end = Math.min(start + blockSize, totalPixels)
+            processPixels(
+                sourceImageData.data,
+                start,
+                end,
+                maskImageData.data
             )
         }
 
-        await Promise.all(promises)
-
-        // Put modified image data back to canvas
+        // Update canvas and return
         sourceCtx.putImageData(sourceImageData, 0, 0)
         return sourceCanvas.toBuffer()
-    } 
-    catch (error) {
+    } catch (error) {
         console.error('Error processing images:', error)
         throw error
     }
@@ -436,44 +436,34 @@ async function removePixelsByImage(sourceImagePath, maskImagePath) {
 
 async function removePixelsByColor(sourceImage) {
     try {
-        // Validate input
         if (!sourceImage) {
             throw new Error('Invalid source image')
         }
 
-        let sourceCanvas = createCanvas(sourceImage.width, sourceImage.height)
-        let sourceCtx = sourceCanvas.getContext('2d')
+        const width = sourceImage.width
+        const height = sourceImage.height
+        const sourceCanvas = createCanvas(width, height)
+        const sourceCtx = sourceCanvas.getContext('2d', { alpha: true })
+        
+        sourceCtx.imageSmoothingEnabled = false
         sourceCtx.drawImage(sourceImage, 0, 0)
-        let sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
-
-        const totalPixels = sourceImageData.data.length
-        const chunkSize = getChunkSize(totalPixels)
-        const chunks = Math.ceil(totalPixels / chunkSize)
-
-        // Process chunks in parallel
-        const promises = []
-        for (let i = 0; i < chunks; i++) {
-            const start = i * chunkSize
-            const end = Math.min(start + chunkSize, totalPixels)
-            promises.push(
-                new Promise((resolve) => {
-                    processPixelChunk(
-                        sourceImageData.data,
-                        start,
-                        end
-                    )
-                    resolve()
-                })
+        
+        const sourceImageData = sourceCtx.getImageData(0, 0, width, height)
+        const totalPixels = width * height * 4
+        const blockSize = 32768
+        
+        for (let start = 0; start < totalPixels; start += blockSize) {
+            const end = Math.min(start + blockSize, totalPixels)
+            processPixels(
+                sourceImageData.data,
+                start,
+                end
             )
         }
 
-        await Promise.all(promises)
-
-        // Put modified image data back to canvas
         sourceCtx.putImageData(sourceImageData, 0, 0)
         return sourceCanvas.toBuffer()
-    }
-    catch (error) {
+    } catch (error) {
         console.error('Error processing images:', error)
         throw error
     }
