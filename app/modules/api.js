@@ -44,13 +44,12 @@ const getAvatar = async (req, res) => {
     else if (type === 'sprite')
         file = `${hash}_spritesheet.webp`
 
-    res.setHeader('Content-Disposition', `attachment; filename="${file}"`)
-    res.setHeader('Content-Type', 'image/webp')
     if (user.customizationHash === hash) {
         try {
             //const avatarsDir = path.join(process.cwd(), 'avatars', file)
             //const buffer = await fs.promises.readFile(avatarsDir)
             //return res.status(200).send(buffer)
+            await fs.promises.access(path.join(process.cwd(), 'avatars', file))
             return res.redirect(`/download/${hash}/image.webp`)
         }
         catch (error) {
@@ -58,8 +57,6 @@ const getAvatar = async (req, res) => {
         }
     }
 
-    res.set('Cache-Control', 'no-cache, must-revalidate')
-    res.set('Last-Modified', new Date().toUTCString())
     const generatedAvatar = await createAvatarThumbnail(user, hash, type)
     user.customizationHash = hash
     res.status(200).redirect(`/download/${hash}/image.webp`)//.send(generatedAvatar)
