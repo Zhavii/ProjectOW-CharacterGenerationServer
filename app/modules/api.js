@@ -7,8 +7,21 @@ import path from 'path'
 import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
+import { Worker } from 'worker_threads'
+import os from 'os'
 
 import User from '../models/User.js'
+
+// In-memory cache for both avatar buffers and processed results
+const avatarCache = new LRUCache({
+    max: 1000, // Adjust based on memory constraints
+    ttl: 1000 * 60 * 60, // 1 hour TTL
+    updateAgeOnGet: true
+})
+
+// Pre-initialize sharp for better performance
+sharp.cache(true)
+sharp.concurrency(1) // Adjust based on server CPU cores
 
 const targetR = 0
 const targetG = 255
@@ -17,38 +30,80 @@ const toleranceR = 50
 const toleranceG = 150
 const toleranceB = 50
 
-const isColorSimilar = (r1, g1, b1, r2, g2, b2) => {
-    return Math.abs(r1 - r2) <= toleranceR &&
-           Math.abs(g1 - g2) <= toleranceG &&
-           Math.abs(b1 - b2) <= toleranceB
+const rMin = targetR - toleranceR
+const rMax = targetR + toleranceR
+const gMin = targetG - toleranceG
+const gMax = targetG + toleranceG
+const bMin = targetB - toleranceB
+const bMax = targetB + toleranceB
+
+const isColorSimilar = (r, g, b) => {
+    return r >= rMin && r <= rMax &&
+           g >= gMin && g <= gMax &&
+           b >= bMin && b <= bMax
 }
 
 const getAvatar = async (req, res) => {
-    const username = req.params.username
-    let user = await User.findOne({ username: username }, 'username customization customizationHash')
-    if (!user) {
-        return res.status(404).send('User not found.')
-    }
+    try {
+        const username = req.params.username
+        
+        // Find user with minimal projection
+        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail', { lean: true })
+        console.log(user)
+        
+        if (!user) {
+            return res.status(404).send('User not found.')
+        }
 
-    const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+        // Calculate hash only once
+        const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
-    let file = `${hash}.webp`
-    if (user.customizationHash === hash) {
+        // Check if file exists without loading it first
+        const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)
+        
         try {
-            const avatarsDir = path.join(process.cwd(), 'avatars', file)
-            const buffer = await fs.readFile(avatarsDir)
-            return res.status(200).send(buffer)
-        }
-        catch (error) {
-            console.error('Avatar not found')
-        }
-    }
+            if (user.customizationHash === hash) {
+                // First check memory cache using username as key
+                const cachedAvatar = avatarCache.get(username)
+                if (cachedAvatar) {
+                    return res.status(200).send(cachedAvatar)
+                }
 
-    //user = user = await User.findOne({ username: username }, 'username customization customizationHash')
-    const generatedAvatar = await createAvatarThumbnail(user, hash)
-    user.customizationHash = hash
-    res.status(200).send(generatedAvatar) //.redirect(`/download/webp/${hash}`)
-    user.save()
+                const stats = await fs.stat(avatarPath)
+                if (stats.isFile()) {
+                    // Stream the file instead of loading into memory
+                    const buffer = await fs.readFile(avatarPath)
+                    avatarCache.set(username, buffer)
+                    return res.status(200).send(buffer)
+                }
+            }
+        } catch (error) {
+            // File doesn't exist or other error, continue to generation
+        }
+
+        // Generate avatar if needed
+        const generatedAvatar = await createAvatarThumbnail(user, hash)
+        
+        // Update cache and hash
+        avatarCache.set(username, generatedAvatar)
+        
+        // Send response immediately
+        res.status(200).send(generatedAvatar)
+        
+        // Update user hash asynchronously
+        if (user.customizationHash !== hash) {
+            User.updateOne(
+                { username }, 
+                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail },
+                { timestamps: false } // Disable automatic timestamp updates
+            ).catch(console.error)
+        }
+
+    } 
+    catch (error) {
+        console.error('Avatar generation error:', error)
+        res.status(500).send('Error generating avatar')
+    }
 }
 
 const createAvatarThumbnail = async (user, hash) => {
@@ -91,16 +146,16 @@ const createAvatarThumbnail = async (user, hash) => {
         let gloves = await getImage(user.customization.gloves)
         let handheld = await getImage(user.customization.handheld)
 
-        let tattoosHead = await getImage(user.customization.tattoos.head)
-        let tattoosNeck = await getImage(user.customization.tattoos.neck)
-        let tattoosChest = await getImage(user.customization.tattoos.chest)
-        let tattoosStomach = await getImage(user.customization.tattoos.stomach)
-        let tattoosBackUpper = await getImage(user.customization.tattoos.backUpper)
-        let tattoosBackLower = await getImage(user.customization.tattoos.backLower)
-        let tattoosArmRight = await getImage(user.customization.tattoos.armRight)
-        let tattoosArmLeft = await getImage(user.customization.tattoos.armLeft)
-        let tattoosLegRight = await getImage(user.customization.tattoos.legRight)
-        let tattoosLegLeft = await getImage(user.customization.tattoos.legLeft)
+        let tattoosHead = await getImage(user.customization.tattoos?.head)
+        let tattoosNeck = await getImage(user.customization.tattoos?.neck)
+        let tattoosChest = await getImage(user.customization.tattoos?.chest)
+        let tattoosStomach = await getImage(user.customization.tattoos?.stomach)
+        let tattoosBackUpper = await getImage(user.customization.tattoos?.backUpper)
+        let tattoosBackLower = await getImage(user.customization.tattoos?.backLower)
+        let tattoosArmRight = await getImage(user.customization.tattoos?.armRight)
+        let tattoosArmLeft = await getImage(user.customization.tattoos?.armLeft)
+        let tattoosLegRight = await getImage(user.customization.tattoos?.legRight)
+        let tattoosLegLeft = await getImage(user.customization.tattoos?.legLeft)
     
         let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
         generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
@@ -280,55 +335,98 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
     })
 }
 
+// Process a chunk of pixels
+const processPixelChunk = (sourceData, start, end, maskData = null) => {
+    for (let i = start; i < end; i += 4) {
+        if (maskData) {
+            // Using mask image logic
+            const maskR = maskData[i]
+            const maskG = maskData[i + 1]
+            const maskB = maskData[i + 2]
+            const maskA = maskData[i + 3]
+
+            // If mask pixel is opaque and matches our target color
+            if (maskA === 255 && isColorSimilar(maskR, maskG, maskB)) {
+                // Make the corresponding source pixel transparent
+                sourceData[i + 3] = 0
+            }
+        } else {
+            // Direct color removal logic
+            const sourceA = sourceData[i + 3]
+            if (sourceA === 255) {
+                const sourceR = sourceData[i]
+                const sourceG = sourceData[i + 1]
+                const sourceB = sourceData[i + 2]
+
+                if (isColorSimilar(sourceR, sourceG, sourceB)) {
+                    sourceData[i + 3] = 0
+                }
+            }
+        }
+    }
+}
+
+// Get optimal chunk size based on image size and CPU cores
+const getChunkSize = (totalPixels) => {
+    const cpuCount = os.cpus().length
+    return Math.ceil(totalPixels / (cpuCount * 4)) * 4
+}
+
 async function removePixelsByImage(sourceImagePath, maskImagePath) {
     try {
         // Load both images
         let sourceImage = sourceImagePath
         let maskImage = maskImagePath
 
-        // Create canvases for source and mask images
+        // Validate images
+        if (!sourceImage || !maskImage || 
+            sourceImage.width !== maskImage.width || 
+            sourceImage.height !== maskImage.height) {
+            throw new Error('Invalid or mismatched image dimensions')
+        }
+
+        // Create canvases
         let sourceCanvas = createCanvas(sourceImage.width, sourceImage.height)
         let maskCanvas = createCanvas(maskImage.width, maskImage.height)
         
         let sourceCtx = sourceCanvas.getContext('2d')
         let maskCtx = maskCanvas.getContext('2d')
 
-        // Draw images onto canvases
+        // Draw images
         sourceCtx.drawImage(sourceImage, 0, 0)
         maskCtx.drawImage(maskImage, 0, 0)
 
-        // Get image data for both images
+        // Get image data
         let sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
         let maskImageData = maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height)
 
-        let pixelsProcessed = 0
-        let pixelsMatched = 0
-  
-        // Process pixels
-        for (let y = 0; y < sourceImageData.height; y++) {
-            for (let x = 0; x < sourceImageData.width; x++) {
-                const sourceIndex = (y * sourceImageData.width + x) * 4
-                const maskIndex = (y * maskImageData.width + x) * 4
-                
-                const maskR = maskImageData.data[maskIndex]
-                const maskG = maskImageData.data[maskIndex + 1]
-                const maskB = maskImageData.data[maskIndex + 2]
-                const maskA = maskImageData.data[maskIndex + 3]
-      
-                pixelsProcessed++
-      
-                // Only process fully opaque pixels in the mask
-                if (maskA === 255 && isColorSimilar(maskR, maskG, maskB, targetR, targetG, targetB)) {
-                    sourceImageData.data[sourceIndex + 3] = 0 // Make source pixel transparent
-                    pixelsMatched++
-                }
-            }
+        const totalPixels = sourceImageData.data.length
+        const chunkSize = getChunkSize(totalPixels)
+        const chunks = Math.ceil(totalPixels / chunkSize)
+
+        // Process chunks in parallel
+        const promises = []
+        for (let i = 0; i < chunks; i++) {
+            const start = i * chunkSize
+            const end = Math.min(start + chunkSize, totalPixels)
+            promises.push(
+                new Promise((resolve) => {
+                    processPixelChunk(
+                        sourceImageData.data,
+                        start,
+                        end,
+                        maskImageData.data
+                    )
+                    resolve()
+                })
+            )
         }
-  
+
+        await Promise.all(promises)
+
         // Put modified image data back to canvas
         sourceCtx.putImageData(sourceImageData, 0, 0)
-        const data = sourceCanvas.toBuffer()
-        return data
+        return sourceCanvas.toBuffer()
     } 
     catch (error) {
         console.error('Error processing images:', error)
@@ -338,40 +436,45 @@ async function removePixelsByImage(sourceImagePath, maskImagePath) {
 
 async function removePixelsByColor(sourceImage) {
     try {
+        // Validate input
+        if (!sourceImage) {
+            throw new Error('Invalid source image')
+        }
+
         let sourceCanvas = createCanvas(sourceImage.width, sourceImage.height)
         let sourceCtx = sourceCanvas.getContext('2d')
         sourceCtx.drawImage(sourceImage, 0, 0)
         let sourceImageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height)
 
-        let pixelsProcessed = 0
-        let pixelsMatched = 0
-        
-        for (let y = 0; y < sourceImageData.height; y++) {
-            for (let x = 0; x < sourceImageData.width; x++) {
-                const sourceIndex = (y * sourceImageData.width + x) * 4
-                
-                const maskR = sourceImageData.data[sourceIndex]
-                const maskG = sourceImageData.data[sourceIndex + 1]
-                const maskB = sourceImageData.data[sourceIndex + 2]
-                const maskA = sourceImageData.data[sourceIndex + 3]
-      
-                pixelsProcessed++
-      
-                // Only process fully opaque pixels in the mask
-                if (maskA === 255 && isColorSimilar(maskR, maskG, maskB, targetR, targetG, targetB)) {
-                    sourceImageData.data[sourceIndex + 3] = 0 // Make source pixel transparent
-                    pixelsMatched++
-                }
-            }
+        const totalPixels = sourceImageData.data.length
+        const chunkSize = getChunkSize(totalPixels)
+        const chunks = Math.ceil(totalPixels / chunkSize)
+
+        // Process chunks in parallel
+        const promises = []
+        for (let i = 0; i < chunks; i++) {
+            const start = i * chunkSize
+            const end = Math.min(start + chunkSize, totalPixels)
+            promises.push(
+                new Promise((resolve) => {
+                    processPixelChunk(
+                        sourceImageData.data,
+                        start,
+                        end
+                    )
+                    resolve()
+                })
+            )
         }
-  
+
+        await Promise.all(promises)
+
         // Put modified image data back to canvas
         sourceCtx.putImageData(sourceImageData, 0, 0)
-        const data = sourceCanvas.toBuffer()
-        return data
+        return sourceCanvas.toBuffer()
     }
     catch (error) {
-        console.error('Error processing images:', error);
+        console.error('Error processing images:', error)
         throw error
     }
 }
@@ -389,5 +492,28 @@ async function cropImage(sourceImage, x, y, width, height) {
         throw error
     }
 }
+
+// Batch process avatar deletion for old files
+const cleanupOldAvatars = async () => {
+    const avatarsDir = path.join(process.cwd(), 'avatars')
+    const files = await fs.readdir(avatarsDir)
+    const now = Date.now()
+    const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
+    
+    for (const file of files) {
+        try {
+            const filePath = path.join(avatarsDir, file)
+            const stats = await fs.stat(filePath)
+            if (now - stats.mtimeMs > maxAge) {
+                await fs.unlink(filePath)
+            }
+        } catch (error) {
+            console.error(`Error cleaning up file ${file}:`, error)
+        }
+    }
+}
+
+// Run cleanup periodically
+setInterval(cleanupOldAvatars, 24 * 60 * 60 * 1000) // Once per day
 
 export default { getAvatar }
