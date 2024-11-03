@@ -6,10 +6,10 @@ import { v4 as uuid } from 'uuid'
 import customization from './customization.js'
 import { createCanvas, loadImage } from 'canvas'
 import uploadContent from './uploadContent.js'
-import sharp from 'sharp'
 import axios from 'axios'
 import fs from 'fs'
 import path from 'path'
+import sharp from 'sharp'
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
@@ -28,6 +28,7 @@ const isColorSimilar = (r1, g1, b1, r2, g2, b2) => {
 }
 
 const getAvatar = async (req, res) => {
+    const type = req.params.type
     const username = req.params.username
     const user = await User.findOne({ username: username })
     if (!user) {
@@ -35,9 +36,18 @@ const getAvatar = async (req, res) => {
     }
 
     const hash = xxHash32(JSON.stringify(user.customization), 0).toString()
+
+    let file = `${hash}.webp`
+    if (type === 'thumbnail')
+        file = `${hash}_thumbnail.webp`
+    else if (type === 'sprite')
+        file = `${hash}_spritesheet.webp`
+
+    res.setHeader('Content-Disposition', `attachment; filename="${file}"`)
+    res.setHeader('Content-Type', 'image/webp')
     if (user.customizationHash === hash) {
         try {
-            const avatarsDir = path.join(process.cwd(), 'avatars', `${user.username}.webp`)
+            const avatarsDir = path.join(process.cwd(), 'avatars', file)
             const buffer = await fs.promises.readFile(avatarsDir)
             return res.status(200).send(buffer)
         }
@@ -46,23 +56,30 @@ const getAvatar = async (req, res) => {
         }
     }
 
-    const avatar = await createAvatarThumbnail(user)
+    const avatar = await createAvatarThumbnail(user, hash, type)
     user.customizationHash = hash
     await user.save()
     return res.status(200).send(avatar)
 }
 
-const createAvatarThumbnail = async (user) => {
+const createAvatarThumbnail = async (user, hash, getType) => {
     return new Promise(async (resolve, reject) => {
         let base = ''
         if (user.customization.isMale && user.customization.bodyType == 0)
-            base = 'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
+            base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
         else if (user.customization.isMale && user.customization.bodyType == 1)
-            base = 'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
+            base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
         else if (!user.customization.isMale && user.customization.bodyType == 0)
-            base = 'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
+            base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
         else if (!user.customization.isMale && user.customization.bodyType == 1)
-            base = 'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
+            base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
+        try {
+            const baseDir = path.join(process.cwd(), 'bases', base)
+            base = await fs.promises.readFile(baseDir)
+        }
+        catch (error) {
+            console.error('Error loading base:', error)
+        }
     
         base = await loadImage(base)
         let hair = await getImage(user.customization.hair.item)
@@ -100,25 +117,42 @@ const createAvatarThumbnail = async (user) => {
         //let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
         //let generatedClothing = await generateAvatar(2550, 850, 0, 0, 2550, 850, null, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
 
-        let generatedClothing = await generateAvatar(2550, 850, 0, 0, 2550, 850, null, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
-        let generatedSpriteSheet = await addClothingToAvatar(base, generatedClothing)
+        let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
+        //let generatedSpriteSheet = await addClothingToAvatar(base, generatedClothing)
         let generatedAvatar = await cropImage(generatedSpriteSheet, 0, 0, 425, 850)
+        let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
+
+        generatedSpriteSheet = await sharp(generatedSpriteSheet).webp({ quality: 100 }).toBuffer()
+        generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
+        generatedThumbnail = await sharp(generatedThumbnail).webp({ quality: 80 }).toBuffer()
 
         try {
             const avatarsDir = path.join(process.cwd(), 'avatars')
             await fs.promises.mkdir(avatarsDir, { recursive: true })
-            const filePath = path.join(avatarsDir, `${user.username}.webp`)
+
+            let filePath = path.join(avatarsDir, `${hash}.webp`)
             await fs.promises.writeFile(filePath, generatedAvatar)
+
+            filePath = path.join(avatarsDir, `${hash}_thumbnail.webp`)
+            await fs.promises.writeFile(filePath, generatedThumbnail)
+
+            filePath = path.join(avatarsDir, `${hash}_spritesheet.webp`)
+            await fs.promises.writeFile(filePath, generatedSpriteSheet)
         }
         catch (error) {
             console.error('Error saving avatar:', error)
         }
-        resolve(generatedAvatar)
+
+        if (getType === 'thumbnail')
+            return resolve(generatedThumbnail)
+        else if (getType === 'sprite')
+            return resolve(generatedSpriteSheet)
+        else
+            resolve(generatedAvatar)
 
         // we generate this afterwards because we don't want to keep the client waiting
-        let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
-        user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-        user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+        //user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+        //user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
         //user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, undefined, undefined, user.username)
     })
 }

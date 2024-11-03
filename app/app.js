@@ -34,4 +34,4 @@ console.log(`Server started @ ${process.env.PORT}`)
 app.get('/', (req, res) => res.send('it works! :D'))
 
 import api from './modules/api.js'
-app.get('/avatar/:username', async (req, res) => api.getAvatar(req, res))
+app.get('/avatar/:username/:type/image.webp', async (req, res) => api.getAvatar(req, res))
