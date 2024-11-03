@@ -48,7 +48,7 @@ const getAvatar = async (req, res) => {
             //return res.redirect(`/download/webp/${hash}`)
         }
         catch (error) {
-            console.error('Error saving avatar:', error)
+            console.error('Avatar not found')
         }
     }
 
