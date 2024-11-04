@@ -9,7 +9,7 @@ import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import { Worker } from 'worker_threads'
 import os from 'os'
-const AWS = require('aws-sdk')
+import AWS from 'aws-sdk'
 
 import User from '../models/User.js'
 
