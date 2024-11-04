@@ -211,7 +211,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 }
 
 const memoryCache = new LRUCache({
-    max: 500,
+    max: 1000,
 })
 
 const CACHE_DIR = path.join(process.cwd(), 'cache');
