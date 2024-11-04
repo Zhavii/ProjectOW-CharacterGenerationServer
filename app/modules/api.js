@@ -91,7 +91,7 @@ const getAvatar = async (req, res) => {
         const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)
         
         try {
-            if (user.customizationHash === hash) {
+            if (user.customizationHash === hash && type !== 'sprite') {
                 const stats = await fs.stat(avatarPath)
                 if (stats.isFile()) {
                     // Stream the file instead of loading into memory
