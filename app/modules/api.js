@@ -45,6 +45,7 @@ const isColorSimilar = (r, g, b) => {
 
 const getAvatar = async (req, res) => {
     try {
+        const type = req.params.type
         const username = req.params.username
         
         // Find user with minimal projection
@@ -57,10 +58,16 @@ const getAvatar = async (req, res) => {
         // Calculate hash only once
         const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
-        // First check memory cache using username as key
-        const cachedAvatar = avatarCache.get(hash)
-        if (cachedAvatar) {
-            return res.status(200).send(cachedAvatar)
+        if (type === 'sprite' && user.customizationHash === hash) {
+            return res.status(200).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${username}.webp`)
+        }
+
+        if (type !== 'sprite') {
+            // First check memory cache using username as key
+            const cachedAvatar = avatarCache.get(hash)
+            if (cachedAvatar) {
+                return res.status(200).send(cachedAvatar)
+            }
         }
 
         // Check if file exists without loading it first
@@ -81,23 +88,15 @@ const getAvatar = async (req, res) => {
         }
 
         // Generate avatar if needed
-        const generatedAvatar = await createAvatarThumbnail(user, hash)
+        const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
         
         // Update cache and hash
         avatarCache.set(hash, generatedAvatar)
         
-        // Send response immediately
-        res.status(200).send(generatedAvatar)
-        
-        // Update user hash asynchronously
-        if (user.customizationHash !== hash) {
-            User.updateOne(
-                { username }, 
-                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
-                { timestamps: false } // Disable automatic timestamp updates
-            ).catch(console.error)
+        if (type !== 'sprite') {
+            // Send response immediately
+            return res.status(200).send(generatedAvatar)
         }
-
     } 
     catch (error) {
         console.error('Avatar generation error:', error)
@@ -105,7 +104,7 @@ const getAvatar = async (req, res) => {
     }
 }
 
-const createAvatarThumbnail = async (user, hash) => {
+const createAvatarThumbnail = async (user, hash, type, res) => {
     return new Promise(async (resolve, reject) => {
         let base = ''
         if (user.customization.isMale && user.customization.bodyType == 0)
@@ -179,6 +178,17 @@ const createAvatarThumbnail = async (user, hash) => {
         user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
         user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
         user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, "DONT", undefined, user.username)
+    
+        // Update user hash asynchronously
+        await User.updateOne(
+            { username: user.username }, 
+            { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
+            { timestamps: false } // Disable automatic timestamp updates
+        ).catch(console.error)
+        
+        if (type === 'sprite') {
+            return res.status(200).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${user.username}.webp`)
+        }
     })
 }
 
