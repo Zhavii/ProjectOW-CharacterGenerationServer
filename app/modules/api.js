@@ -9,8 +9,16 @@ import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import { Worker } from 'worker_threads'
 import os from 'os'
+const AWS = require('aws-sdk')
 
 import User from '../models/User.js'
+
+const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
+const s3 = new AWS.S3({
+  endpoint: spacesEndpoint,
+  accessKeyId: process.env.DO_SPACE_ID,
+  secretAccessKey: process.env.DO_SPACE_KEY
+});
 
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
@@ -43,6 +51,14 @@ const isColorSimilar = (r, g, b) => {
            b >= bMin && b <= bMax
 }
 
+const getParams = (username) => {
+    return {
+        Bucket: process.env.DO_SPACE_NAME,
+        Key: `user-clothing/${username}.webp`,
+        Expires: 3600 // URL expires in 1 hour
+    }
+}
+
 const getAvatar = async (req, res) => {
     try {
         const type = req.params.type
@@ -59,7 +75,8 @@ const getAvatar = async (req, res) => {
         const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
         if (type === 'sprite' && user.customizationHash === hash) {
-            return res.status(307).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${username}.webp`)
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(username))
+            return res.status(307).redirect(signedUrl)
         }
 
         if (type !== 'sprite') {
@@ -187,7 +204,8 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
         ).catch(console.error)
         
         if (type === 'sprite') {
-            return res.status(307).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${user.username}.webp`)
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+            return res.status(307).redirect(signedUrl)
         }
     })
 }
