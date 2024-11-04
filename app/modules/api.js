@@ -59,7 +59,7 @@ const getAvatar = async (req, res) => {
         const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
 
         if (type === 'sprite' && user.customizationHash === hash) {
-            return res.status(200).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${username}.webp`)
+            return res.status(307).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${username}.webp`)
         }
 
         if (type !== 'sprite') {
@@ -187,7 +187,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
         ).catch(console.error)
         
         if (type === 'sprite') {
-            return res.status(200).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${user.username}.webp`)
+            return res.status(307).redirect(`https://${process.env.DO_SPACE_ENDPOINT}user-clothing/${user.username}.webp`)
         }
     })
 }
