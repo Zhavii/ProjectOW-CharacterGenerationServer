@@ -9,6 +9,7 @@ const itemSchema = new mongoose.Schema({
     description: { type: String },
     rarity: { type: Number, default: 0 }, // 0 - normal | 1 - rare | 2 - epic | 3 - legendary
     gender: { type: Number }, // Male = 0 | Female = 1 | Unisex = 2
+    hasFatSheet: { type: Boolean, default: false },
 
     costCoins: { type: Number },
     costGems: { type: Number },
@@ -18,6 +19,7 @@ const itemSchema = new mongoose.Schema({
 
     previewLocation: { type: String },
     spriteLocation: { type: String },
+    fatSpriteLocation: { type: String },
 
     // 100 = furniture
     // 101 = pose
