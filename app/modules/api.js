@@ -304,24 +304,6 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(tattoosLegLeft, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (eyes)
             ctx.drawImage(eyes, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (hair) {
-            if (hat)
-            {
-                let hairWithoutHat = await removePixelsByImage(hair, hat)
-                hairWithoutHat = await loadImage(hairWithoutHat)
-                ctx.drawImage(hairWithoutHat, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-                
-                let hatWithoutMask = await removePixelsByColor(hat)
-                hatWithoutMask = await loadImage(hatWithoutMask)
-                ctx.drawImage(hatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-            }
-            else
-            {
-                ctx.drawImage(hair, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-            }
-        }
-        if (beard)
-            ctx.drawImage(beard, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (eyebrows)
             ctx.drawImage(eyebrows, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (head)
@@ -330,6 +312,22 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(nose, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (mouth)
             ctx.drawImage(mouth, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (beard)
+            ctx.drawImage(beard, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (hair) {
+            if (hat) {
+                let hairWithoutHat = await removePixelsByImage(hair, hat)
+                hairWithoutHat = await loadImage(hairWithoutHat)
+                ctx.drawImage(hairWithoutHat, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+                
+                let hatWithoutMask = await removePixelsByColor(hat)
+                hatWithoutMask = await loadImage(hatWithoutMask)
+                ctx.drawImage(hatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+            }
+            else {
+                ctx.drawImage(hair, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+            }
+        }
         if (hat && !hair) {
             let hatWithoutMask = await removePixelsByColor(hat)
             hatWithoutMask = await loadImage(hatWithoutMask)
@@ -347,12 +345,27 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(gloves, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (handheld)
             ctx.drawImage(handheld, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (top)
-            ctx.drawImage(top, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (top) {
+            if (coat) {
+                let topWithoutCoat = await removePixelsByImage(top, coat)
+                topWithoutCoat = await loadImage(topWithoutCoat)
+                ctx.drawImage(topWithoutCoat, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+
+                let coatWithoutMask = await removePixelsByColor(coat)
+                coatWithoutMask = await loadImage(coatWithoutMask)
+                ctx.drawImage(coatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+            }
+            else {
+                ctx.drawImage(top, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+            }
+        }
         if (neckwear)
             ctx.drawImage(neckwear, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (coat)
-            ctx.drawImage(coat, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (coat && !top) {
+            let coatWithoutMask = await removePixelsByColor(coat)
+            coatWithoutMask = await loadImage(coatWithoutMask)
+            ctx.drawImage(coatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        }
         if (foot)
             ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bag)
