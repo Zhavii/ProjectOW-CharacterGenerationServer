@@ -123,15 +123,16 @@ const getAvatar = async (req, res) => {
 
 const createAvatarThumbnail = async (user, hash, type, res) => {
     return new Promise(async (resolve, reject) => {
-        let base = ''
-        if (user.customization.isMale && user.customization.bodyType == 0)
-            base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
-        else if (user.customization.isMale && user.customization.bodyType == 1)
-            base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
-        else if (!user.customization.isMale && user.customization.bodyType == 0)
-            base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
-        else if (!user.customization.isMale && user.customization.bodyType == 1)
-            base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
+        let skinTone = user.customization.skinTone ?? 0
+        let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
+        //if (user.customization.isMale && user.customization.bodyType == 0)
+        //    base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
+        //else if (user.customization.isMale && user.customization.bodyType == 1)
+        //    base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
+        //else if (!user.customization.isMale && user.customization.bodyType == 0)
+        //    base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
+        //else if (!user.customization.isMale && user.customization.bodyType == 1)
+        //    base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
         try {
             const baseDir = path.join(process.cwd(), 'bases', base)
             base = await fs.readFile(baseDir)

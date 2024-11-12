@@ -33,7 +33,7 @@ const userSchema = new mongoose.Schema({
         isMale: { type: Boolean, default: false },
         bodyType: { type: Number, default: 0 }, // 0 = Normal | 1 = Curvy | 2 = Thin (Female only)
         //isFat: { type: Boolean, default: false },
-        skinColor: { type: String, default: '#ffdcbf' },
+        skinTone: { type: Number, default: 0 },
         height: { type: Number, default: 0 },
         width: { type: Number, default: 0 },
 
