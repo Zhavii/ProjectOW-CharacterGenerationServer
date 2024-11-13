@@ -34,8 +34,8 @@ const userSchema = new mongoose.Schema({
         bodyType: { type: Number, default: 0 }, // 0 = Normal | 1 = Curvy | 2 = Thin (Female only)
         //isFat: { type: Boolean, default: false },
         skinTone: { type: Number, default: 0 },
-        height: { type: Number, default: 0 },
-        width: { type: Number, default: 0 },
+        height: { type: Number, default: 1 },
+        width: { type: Number, default: 1 },
 
         hair: { 
             item: { type: mongoose.Types.ObjectId, ref: 'Item' },
