@@ -340,6 +340,8 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(glasses, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bracelets)
             ctx.drawImage(bracelets, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (foot)
+            ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bottom)
             ctx.drawImage(bottom, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (gloves)
@@ -367,8 +369,6 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             coatWithoutMask = await loadImage(coatWithoutMask)
             ctx.drawImage(coatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         }
-        if (foot)
-            ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bag)
             ctx.drawImage(bag, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
 
