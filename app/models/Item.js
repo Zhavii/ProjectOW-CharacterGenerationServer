@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 const itemSchema = new mongoose.Schema({
     isPublished: { type: Boolean, default: false },
     numberOfPurchases: { type: Number, default: 0 },
+    sortingOrder: { type: Number, default: 0 },
 
     creator: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     name: { type: String },
