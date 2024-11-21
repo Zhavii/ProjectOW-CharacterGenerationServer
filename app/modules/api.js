@@ -12,6 +12,7 @@ import os from 'os'
 import AWS from 'aws-sdk'
 
 import User from '../models/User.js'
+import Item from '../models/Item.js'
 
 const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
 const s3 = new AWS.S3({
@@ -172,8 +173,14 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
         let tattoosArmLeft = await getImage(user.customization.tattoos?.armLeft)
         let tattoosLegRight = await getImage(user.customization.tattoos?.legRight)
         let tattoosLegLeft = await getImage(user.customization.tattoos?.legLeft)
+
+        let shoesBehindPants = false
+        if (user.customization.bottom) {
+            const pants = await Item.findById(user.customization.bottom, 'description').lean()
+            shoesBehindPants = pants.description.includes('!x')
+        }
     
-        let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
+        let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
         generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
 
         try {
@@ -191,7 +198,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
         resolve(generatedAvatar)
 
         // we generate this afterwards because we don't want to keep the client waiting
-        let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft)
+        let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
         let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
         user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
         user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
@@ -276,7 +283,7 @@ const getImage = async (item) => {
  * @param {number} sourceWidth - The width of the source element.
  * @param {number} sourceHeight - The height of the source element.
 **/
-const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft) => {
+const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants) => {
     return new Promise(async (resolve, reject) => {
         const canvas = createCanvas(canvasSizeX, canvasSizeY)
         const ctx = canvas.getContext('2d')
@@ -340,10 +347,12 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(glasses, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bracelets)
             ctx.drawImage(bracelets, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (foot)
+        if (foot && !shoesBehindPants)
             ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bottom)
             ctx.drawImage(bottom, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (foot)
+            ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (gloves)
             ctx.drawImage(gloves, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (handheld)
