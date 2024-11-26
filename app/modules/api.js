@@ -558,4 +558,103 @@ const cleanupOldAvatars = async () => {
 // Run cleanup periodically
 setInterval(cleanupOldAvatars, 24 * 60 * 60 * 1000) // Once per day
 
-export default { getAvatar }
+
+/**
+ * Clears all caches: memory caches and disk cache
+ * @returns {Promise<Object>} Results of the cache clearing operations
+ */
+const clearAllCaches = async () => {
+    try {
+        const results = {
+            memoryCachesCleared: false,
+            diskCacheCleared: false,
+            errors: []
+        }
+
+        // Clear memory caches
+        try {
+            avatarCache.clear()
+            memoryCache.clear()
+            results.memoryCachesCleared = true
+        } catch (error) {
+            results.errors.push({
+                type: 'memory_cache',
+                error: error.message
+            })
+        }
+
+        // Clear disk cache
+        try {
+            const CACHE_DIR = path.join(process.cwd(), 'cache')
+            const files = await fs.readdir(CACHE_DIR)
+            
+            await Promise.all(files.map(async (file) => {
+                const filePath = path.join(CACHE_DIR, file)
+                try {
+                    await fs.unlink(filePath)
+                } catch (error) {
+                    results.errors.push({
+                        type: 'disk_cache_file',
+                        file: file,
+                        error: error.message
+                    })
+                }
+            }))
+
+            results.diskCacheCleared = true
+        } catch (error) {
+            if (error.code !== 'ENOENT') { // Ignore error if cache directory doesn't exist
+                results.errors.push({
+                    type: 'disk_cache_dir',
+                    error: error.message
+                })
+            }
+        }
+
+        // Create fresh cache directory
+        try {
+            const CACHE_DIR = path.join(process.cwd(), 'cache')
+            await fs.mkdir(CACHE_DIR, { recursive: true })
+        } catch (error) {
+            results.errors.push({
+                type: 'cache_dir_creation',
+                error: error.message
+            })
+        }
+
+        return results
+    } catch (error) {
+        throw new Error(`Failed to clear caches: ${error.message}`)
+    }
+}
+
+/**
+ * Express middleware to handle cache clearing requests
+ */
+const handleCacheClear = async (req, res) => {
+    try {
+        const results = await clearAllCaches()
+        
+        if (results.errors.length === 0) {
+            res.status(200).json({
+                success: true,
+                message: 'All caches cleared successfully',
+                details: results
+            })
+        } else {
+            res.status(207).json({
+                success: true,
+                message: 'Caches cleared with some errors',
+                details: results
+            })
+        }
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Failed to clear caches',
+            error: error.message
+        })
+    }
+}
+
+export default { getAvatar, clearAllCaches, handleCacheClear }
