@@ -124,96 +124,102 @@ const getAvatar = async (req, res) => {
 
 const createAvatarThumbnail = async (user, hash, type, res) => {
     return new Promise(async (resolve, reject) => {
-        let skinTone = user.customization.skinTone ?? 0
-        let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
-        //if (user.customization.isMale && user.customization.bodyType == 0)
-        //    base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
-        //else if (user.customization.isMale && user.customization.bodyType == 1)
-        //    base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
-        //else if (!user.customization.isMale && user.customization.bodyType == 0)
-        //    base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
-        //else if (!user.customization.isMale && user.customization.bodyType == 1)
-        //    base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
         try {
-            const baseDir = path.join(process.cwd(), 'bases', base)
-            base = await fs.readFile(baseDir)
-        }
-        catch (error) {
-            console.error('Error loading base:', error)
-        }
-    
-        base = await loadImage(base)
-        let hair = await getImage(user.customization.hair.item)
-        let beard = await getImage(user.customization.beard.item)
-        let eyes = await getImage(user.customization.eyes.item)
-        let eyebrows = await getImage(user.customization.eyebrows.item)
-        let head = await getImage(user.customization.head)
-        let nose = await getImage(user.customization.nose)
-        let mouth = await getImage(user.customization.mouth)
-        let hat = await getImage(user.customization.hat)
-        let piercings = await getImage(user.customization.piercings)
-        let glasses = await getImage(user.customization.glasses)
-        let top = await getImage(user.customization.top)
-        let coat = await getImage(user.customization.coat)
-        let bottom = await getImage(user.customization.bottom)
-        let foot = await getImage(user.customization.foot)
-        let bracelets = await getImage(user.customization.bracelets)
-        let neckwear = await getImage(user.customization.neckwear)
-        let bag = await getImage(user.customization.bag)
-        let gloves = await getImage(user.customization.gloves)
-        let handheld = await getImage(user.customization.handheld)
-
-        let tattoosHead = await getImage(user.customization.tattoos?.head)
-        let tattoosNeck = await getImage(user.customization.tattoos?.neck)
-        let tattoosChest = await getImage(user.customization.tattoos?.chest)
-        let tattoosStomach = await getImage(user.customization.tattoos?.stomach)
-        let tattoosBackUpper = await getImage(user.customization.tattoos?.backUpper)
-        let tattoosBackLower = await getImage(user.customization.tattoos?.backLower)
-        let tattoosArmRight = await getImage(user.customization.tattoos?.armRight)
-        let tattoosArmLeft = await getImage(user.customization.tattoos?.armLeft)
-        let tattoosLegRight = await getImage(user.customization.tattoos?.legRight)
-        let tattoosLegLeft = await getImage(user.customization.tattoos?.legLeft)
-
-        let shoesBehindPants = false
-        if (user.customization.bottom) {
-            const pants = await Item.findById(user.customization.bottom, 'description').lean()
-            shoesBehindPants = pants.description.includes('!x')
-        }
-    
-        let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
-        generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
-
-        try {
-            const avatarsDir = path.join(process.cwd(), 'avatars')
-            await fs.mkdir(avatarsDir, { recursive: true })
-
-            let filePath = path.join(avatarsDir, `${hash}.webp`)
-            await fs.writeFile(filePath, generatedAvatar)
-        }
-        catch (error) {
-            console.error('Error saving avatar:', error)
-        }
-
-        // return/resolve early so that we don't make the client wait
-        resolve(generatedAvatar)
-
-        // we generate this afterwards because we don't want to keep the client waiting
-        let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
-        let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
-        user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-        user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-        user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, "DONT", undefined, user.username)
-    
-        // Update user hash asynchronously
-        await User.updateOne(
-            { username: user.username }, 
-            { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
-            { timestamps: false } // Disable automatic timestamp updates
-        ).catch(console.error)
+            let skinTone = user.customization.skinTone ?? 0
+            let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
+            //if (user.customization.isMale && user.customization.bodyType == 0)
+            //    base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
+            //else if (user.customization.isMale && user.customization.bodyType == 1)
+            //    base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
+            //else if (!user.customization.isMale && user.customization.bodyType == 0)
+            //    base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
+            //else if (!user.customization.isMale && user.customization.bodyType == 1)
+            //    base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
+            try {
+                const baseDir = path.join(process.cwd(), 'bases', base)
+                base = await fs.readFile(baseDir)
+            }
+            catch (error) {
+                console.error('Error loading base:', error)
+            }
         
-        if (type === 'sprite') {
-            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
-            return res.status(307).redirect(signedUrl)
+            base = await loadImage(base)
+            let hair = await getImage(user.customization.hair.item)
+            let beard = await getImage(user.customization.beard.item)
+            let eyes = await getImage(user.customization.eyes.item)
+            let eyebrows = await getImage(user.customization.eyebrows.item)
+            let head = await getImage(user.customization.head)
+            let nose = await getImage(user.customization.nose)
+            let mouth = await getImage(user.customization.mouth)
+            let hat = await getImage(user.customization.hat)
+            let piercings = await getImage(user.customization.piercings)
+            let glasses = await getImage(user.customization.glasses)
+            let top = await getImage(user.customization.top)
+            let coat = await getImage(user.customization.coat)
+            let bottom = await getImage(user.customization.bottom)
+            let foot = await getImage(user.customization.foot)
+            let bracelets = await getImage(user.customization.bracelets)
+            let neckwear = await getImage(user.customization.neckwear)
+            let bag = await getImage(user.customization.bag)
+            let gloves = await getImage(user.customization.gloves)
+            let handheld = await getImage(user.customization.handheld)
+
+            let tattoosHead = await getImage(user.customization.tattoos?.head)
+            let tattoosNeck = await getImage(user.customization.tattoos?.neck)
+            let tattoosChest = await getImage(user.customization.tattoos?.chest)
+            let tattoosStomach = await getImage(user.customization.tattoos?.stomach)
+            let tattoosBackUpper = await getImage(user.customization.tattoos?.backUpper)
+            let tattoosBackLower = await getImage(user.customization.tattoos?.backLower)
+            let tattoosArmRight = await getImage(user.customization.tattoos?.armRight)
+            let tattoosArmLeft = await getImage(user.customization.tattoos?.armLeft)
+            let tattoosLegRight = await getImage(user.customization.tattoos?.legRight)
+            let tattoosLegLeft = await getImage(user.customization.tattoos?.legLeft)
+
+            let shoesBehindPants = false
+            if (user.customization.bottom) {
+                const pants = await Item.findById(user.customization.bottom, 'description').lean()
+                shoesBehindPants = pants.description.includes('!x')
+            }
+        
+            let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
+            generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
+
+            try {
+                const avatarsDir = path.join(process.cwd(), 'avatars')
+                await fs.mkdir(avatarsDir, { recursive: true })
+
+                let filePath = path.join(avatarsDir, `${hash}.webp`)
+                await fs.writeFile(filePath, generatedAvatar)
+            }
+            catch (error) {
+                console.error('Error saving avatar:', error)
+            }
+
+            // return/resolve early so that we don't make the client wait
+            resolve(generatedAvatar)
+
+            // we generate this afterwards because we don't want to keep the client waiting
+            let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
+            let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
+            user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+            user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+            user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, "DONT", undefined, user.username)
+        
+            // Update user hash asynchronously
+            await User.updateOne(
+                { username: user.username }, 
+                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
+                { timestamps: false } // Disable automatic timestamp updates
+            ).catch(console.error)
+
+            if (type === 'sprite') {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+                return res.status(307).redirect(signedUrl)
+            }
+        }
+        catch (error) {
+            console.error('Error generating avatar:', error)
+            reject(error)
         }
     })
 }
