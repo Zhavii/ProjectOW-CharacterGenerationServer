@@ -7,7 +7,6 @@ import path from 'path'
 import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
-import { Worker } from 'worker_threads'
 import os from 'os'
 import AWS from 'aws-sdk'
 
@@ -144,6 +143,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             }
         
             base = await loadImage(base)
+            let makeup = await getImage(user.customization.makeup)
             let hair = await getImage(user.customization.hair.item)
             let beard = await getImage(user.customization.beard.item)
             let eyes = await getImage(user.customization.eyes.item)
@@ -153,13 +153,19 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             let mouth = await getImage(user.customization.mouth)
             let hat = await getImage(user.customization.hat)
             let piercings = await getImage(user.customization.piercings)
+            let earPiece = await getImage(user.customization.earPiece)
             let glasses = await getImage(user.customization.glasses)
+            let horns = await getImage(user.customization.horns)
             let top = await getImage(user.customization.top)
-            let coat = await getImage(user.customization.coat)
-            let bottom = await getImage(user.customization.bottom)
-            let foot = await getImage(user.customization.foot)
-            let bracelets = await getImage(user.customization.bracelets)
+            let necklace = await getImage(user.customization.necklace)
             let neckwear = await getImage(user.customization.neckwear)
+            let coat = await getImage(user.customization.coat)
+            let belt = await getImage(user.customization.belt)
+            let bottom = await getImage(user.customization.bottom)
+            let socks = await getImage(user.customization.socks)
+            let shoes = await getImage(user.customization.shoes)
+            let bracelets = await getImage(user.customization.bracelets)
+            let wings = await getImage(user.customization.wings)
             let bag = await getImage(user.customization.bag)
             let gloves = await getImage(user.customization.gloves)
             let handheld = await getImage(user.customization.handheld)
@@ -181,7 +187,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 shoesBehindPants = pants.description.includes('!x')
             }
         
-            let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
+            let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
             generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
 
             try {
@@ -199,7 +205,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             resolve(generatedAvatar)
 
             // we generate this afterwards because we don't want to keep the client waiting
-            let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
+            let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
             let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
             user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
             user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
@@ -289,7 +295,7 @@ const getImage = async (item) => {
  * @param {number} sourceWidth - The width of the source element.
  * @param {number} sourceHeight - The height of the source element.
 **/
-const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, base, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, glasses, top, coat, bottom, foot, bracelets, neckwear, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants) => {
+const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants) => {
     return new Promise(async (resolve, reject) => {
         const canvas = createCanvas(canvasSizeX, canvasSizeY)
         const ctx = canvas.getContext('2d')
@@ -316,6 +322,8 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             ctx.drawImage(tattoosLegRight, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (tattoosLegLeft)
             ctx.drawImage(tattoosLegLeft, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (makeup)
+            ctx.drawImage(makeup, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (eyes)
             ctx.drawImage(eyes, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (eyebrows)
@@ -349,16 +357,24 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
         }
         if (piercings)
             ctx.drawImage(piercings, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (earPiece)
+            ctx.drawImage(earPiece, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (glasses)
             ctx.drawImage(glasses, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (horns)
+            ctx.drawImage(horns, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bracelets)
             ctx.drawImage(bracelets, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (foot && !shoesBehindPants)
-            ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (socks)
+            ctx.drawImage(socks, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (shoes && !shoesBehindPants)
+            ctx.drawImage(shoes, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bottom)
             ctx.drawImage(bottom, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
-        if (foot && shoesBehindPants)
-            ctx.drawImage(foot, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (belt)
+            ctx.drawImage(belt, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
+        if (shoes && shoesBehindPants)
+            ctx.drawImage(shoes, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (gloves)
             ctx.drawImage(gloves, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (handheld)
@@ -377,6 +393,8 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
                 ctx.drawImage(top, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
             }
         }
+        if (necklace)
+            ctx.drawImage(necklace, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (neckwear)
             ctx.drawImage(neckwear, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (coat && !top) {
@@ -384,6 +402,8 @@ const generateAvatar = async (canvasSizeX, canvasSizeY, sourceStartPositionX, so
             coatWithoutMask = await loadImage(coatWithoutMask)
             ctx.drawImage(coatWithoutMask, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         }
+        if (wings)
+            ctx.drawImage(wings, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
         if (bag)
             ctx.drawImage(bag, sourceStartPositionX, sourceStartPositionY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height)
 

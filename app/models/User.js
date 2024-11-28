@@ -37,6 +37,7 @@ const userSchema = new mongoose.Schema({
         height: { type: Number, default: 1 },
         width: { type: Number, default: 1 },
 
+        makeup: { type: mongoose.Types.ObjectId, ref: 'Item' },
         hair: { 
             item: { type: mongoose.Types.ObjectId, ref: 'Item' },
             color: { type: String, default: '#572d0f' }
@@ -63,16 +64,22 @@ const userSchema = new mongoose.Schema({
 
         hat: { type: mongoose.Types.ObjectId, ref: 'Item' },
         piercings: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        earPiece: { type: mongoose.Types.ObjectId, ref: 'Item' },
         glasses: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        horns: { type: mongoose.Types.ObjectId, ref: 'Item' },
 
         top: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        necklace: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        neckwear: { type: mongoose.Types.ObjectId, ref: 'Item' },
         coat: { type: mongoose.Types.ObjectId, ref: 'Item' },
 
+        belt: { type: mongoose.Types.ObjectId, ref: 'Item' },
         bottom: { type: mongoose.Types.ObjectId, ref: 'Item' },
-        foot: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        socks: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        shoes: { type: mongoose.Types.ObjectId, ref: 'Item' },
 
         bracelets: { type: mongoose.Types.ObjectId, ref: 'Item' },
-        neckwear: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        wings: { type: mongoose.Types.ObjectId, ref: 'Item' },
         bag: { type: mongoose.Types.ObjectId, ref: 'Item' },
 
         gloves: { type: mongoose.Types.ObjectId, ref: 'Item' },
