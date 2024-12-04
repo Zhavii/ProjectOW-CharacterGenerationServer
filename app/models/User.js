@@ -38,6 +38,12 @@ const userSchema = new mongoose.Schema({
         width: { type: Number, default: 1 },
 
         makeup: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        hair: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        beard: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        eyes: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        eyebrows: { type: mongoose.Types.ObjectId, ref: 'Item' },
+        
+        /*
         hair: { 
             item: { type: mongoose.Types.ObjectId, ref: 'Item' },
             color: { type: String, default: '#572d0f' }
@@ -57,6 +63,7 @@ const userSchema = new mongoose.Schema({
             item: { type: mongoose.Types.ObjectId, ref: 'Item' },
             color: { type: String, default: '#572d0f' }
         },
+        */
 
         head: { type: mongoose.Types.ObjectId, ref: 'Item' },
         nose: { type: mongoose.Types.ObjectId, ref: 'Item' },

@@ -124,103 +124,160 @@ const getAvatar = async (req, res) => {
 const createAvatarThumbnail = async (user, hash, type, res) => {
     return new Promise(async (resolve, reject) => {
         try {
+            // Determine base image based on user customization
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
-            //if (user.customization.isMale && user.customization.bodyType == 0)
-            //    base = 'male_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fit.png'
-            //else if (user.customization.isMale && user.customization.bodyType == 1)
-            //    base = 'male_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/male_fat.png'
-            //else if (!user.customization.isMale && user.customization.bodyType == 0)
-            //    base = 'female_fit.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fit.png'
-            //else if (!user.customization.isMale && user.customization.bodyType == 1)
-            //    base = 'female_fat.png'//'https://project-ow.nyc3.digitaloceanspaces.com/__main/female_fat.png'
+            
             try {
                 const baseDir = path.join(process.cwd(), 'bases', base)
                 base = await fs.readFile(baseDir)
             }
             catch (error) {
                 console.error('Error loading base:', error)
+                throw error
             }
-        
-            base = await loadImage(base)
-            let makeup = await getImage(user.customization.makeup)
-            let hair = await getImage(user.customization.hair.item)
-            let beard = await getImage(user.customization.beard.item)
-            let eyes = await getImage(user.customization.eyes.item)
-            let eyebrows = await getImage(user.customization.eyebrows.item)
-            let head = await getImage(user.customization.head)
-            let nose = await getImage(user.customization.nose)
-            let mouth = await getImage(user.customization.mouth)
-            let hat = await getImage(user.customization.hat)
-            let piercings = await getImage(user.customization.piercings)
-            let earPiece = await getImage(user.customization.earPiece)
-            let glasses = await getImage(user.customization.glasses)
-            let horns = await getImage(user.customization.horns)
-            let top = await getImage(user.customization.top)
-            let necklace = await getImage(user.customization.necklace)
-            let neckwear = await getImage(user.customization.neckwear)
-            let coat = await getImage(user.customization.coat)
-            let belt = await getImage(user.customization.belt)
-            let bottom = await getImage(user.customization.bottom)
-            let socks = await getImage(user.customization.socks)
-            let shoes = await getImage(user.customization.shoes)
-            let bracelets = await getImage(user.customization.bracelets)
-            let wings = await getImage(user.customization.wings)
-            let bag = await getImage(user.customization.bag)
-            let gloves = await getImage(user.customization.gloves)
-            let handheld = await getImage(user.customization.handheld)
 
-            let tattoosHead = await getImage(user.customization.tattoos?.head)
-            let tattoosNeck = await getImage(user.customization.tattoos?.neck)
-            let tattoosChest = await getImage(user.customization.tattoos?.chest)
-            let tattoosStomach = await getImage(user.customization.tattoos?.stomach)
-            let tattoosBackUpper = await getImage(user.customization.tattoos?.backUpper)
-            let tattoosBackLower = await getImage(user.customization.tattoos?.backLower)
-            let tattoosArmRight = await getImage(user.customization.tattoos?.armRight)
-            let tattoosArmLeft = await getImage(user.customization.tattoos?.armLeft)
-            let tattoosLegRight = await getImage(user.customization.tattoos?.legRight)
-            let tattoosLegLeft = await getImage(user.customization.tattoos?.legLeft)
+            // Load all customization images
+            const loadedImages = {
+                base: await loadImage(base),
+                makeup: await getImage(user.customization.makeup),
+                hair: await getImage(user.customization.hair),
+                beard: await getImage(user.customization.beard),
+                eyes: await getImage(user.customization.eyes),
+                eyebrows: await getImage(user.customization.eyebrows),
+                head: await getImage(user.customization.head),
+                nose: await getImage(user.customization.nose),
+                mouth: await getImage(user.customization.mouth),
+                hat: await getImage(user.customization.hat),
+                piercings: await getImage(user.customization.piercings),
+                earPiece: await getImage(user.customization.earPiece),
+                glasses: await getImage(user.customization.glasses),
+                horns: await getImage(user.customization.horns),
+                top: await getImage(user.customization.top),
+                necklace: await getImage(user.customization.necklace),
+                neckwear: await getImage(user.customization.neckwear),
+                coat: await getImage(user.customization.coat),
+                belt: await getImage(user.customization.belt),
+                bottom: await getImage(user.customization.bottom),
+                socks: await getImage(user.customization.socks),
+                shoes: await getImage(user.customization.shoes),
+                bracelets: await getImage(user.customization.bracelets),
+                wings: await getImage(user.customization.wings),
+                bag: await getImage(user.customization.bag),
+                gloves: await getImage(user.customization.gloves),
+                handheld: await getImage(user.customization.handheld),
+                // Load tattoos
+                tattoosHead: await getImage(user.customization.tattoos?.head),
+                tattoosNeck: await getImage(user.customization.tattoos?.neck),
+                tattoosChest: await getImage(user.customization.tattoos?.chest),
+                tattoosStomach: await getImage(user.customization.tattoos?.stomach),
+                tattoosBackUpper: await getImage(user.customization.tattoos?.backUpper),
+                tattoosBackLower: await getImage(user.customization.tattoos?.backLower),
+                tattoosArmRight: await getImage(user.customization.tattoos?.armRight),
+                tattoosArmLeft: await getImage(user.customization.tattoos?.armLeft),
+                tattoosLegRight: await getImage(user.customization.tattoos?.legRight),
+                tattoosLegLeft: await getImage(user.customization.tattoos?.legLeft)
+            }
 
+            // Check if shoes should be behind pants
             let shoesBehindPants = false
             if (user.customization.bottom) {
                 const pants = await Item.findById(user.customization.bottom, 'description').lean()
                 shoesBehindPants = pants.description.includes('!x')
             }
-        
-            let generatedAvatar = await generateAvatar(425, 850, 0, 0, 425, 850, base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
-            generatedAvatar = await sharp(generatedAvatar).webp({ quality: 100 }).toBuffer()
+
+            // Generate front-facing avatar for thumbnail
+            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages)
+            const frontFacingBuffer = await sharp(frontFacingAvatar)
+                .webp({ quality: 100 })
+                .toBuffer()
 
             try {
                 const avatarsDir = path.join(process.cwd(), 'avatars')
                 await fs.mkdir(avatarsDir, { recursive: true })
-
-                let filePath = path.join(avatarsDir, `${hash}.webp`)
-                await fs.writeFile(filePath, generatedAvatar)
+                const filePath = path.join(avatarsDir, `${hash}.webp`)
+                await fs.writeFile(filePath, frontFacingBuffer)
             }
             catch (error) {
                 console.error('Error saving avatar:', error)
             }
 
-            // return/resolve early so that we don't make the client wait
-            resolve(generatedAvatar)
+            // Update cache and resolve with front-facing avatar
+            avatarCache.set(hash, frontFacingBuffer)
+            resolve(frontFacingBuffer)
 
-            // we generate this afterwards because we don't want to keep the client waiting
-            let generatedSpriteSheet = await generateAvatar(2550, 850, 0, 0, 2550, 850, base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, tattoosLegRight, tattoosLegLeft, shoesBehindPants)
-            let generatedThumbnail = await cropImage(generatedSpriteSheet, 103, 42, 218, 218)
-            user.clothing = await uploadContent(user.clothing, { data: generatedSpriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-            user.thumbnail = await uploadContent(user.thumbnail, { data: generatedThumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-            user.avatar = await uploadContent(user.avatar, { data: generatedAvatar }, 'user-avatar', 5, "DONT", undefined, user.username)
-        
-            // Update user hash asynchronously
-            await User.updateOne(
-                { username: user.username }, 
-                { customizationHash: hash, clothing: user.clothing, thumbnail: user.thumbnail, avatar: user.avatar },
-                { timestamps: false } // Disable automatic timestamp updates
-            ).catch(console.error)
-
+            // Generate full sprite sheet asynchronously
             if (type === 'sprite') {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
-                return res.status(307).redirect(signedUrl)
+                try {
+                    const spriteSheet = await generateFullSpriteSheet(
+                        loadedImages.base,
+                        loadedImages.makeup,
+                        loadedImages.hair,
+                        loadedImages.beard,
+                        loadedImages.eyes,
+                        loadedImages.eyebrows,
+                        loadedImages.head,
+                        loadedImages.nose,
+                        loadedImages.mouth,
+                        loadedImages.hat,
+                        loadedImages.piercings,
+                        loadedImages.earPiece,
+                        loadedImages.glasses,
+                        loadedImages.horns,
+                        loadedImages.top,
+                        loadedImages.necklace,
+                        loadedImages.neckwear,
+                        loadedImages.coat,
+                        loadedImages.belt,
+                        loadedImages.bottom,
+                        loadedImages.socks,
+                        loadedImages.shoes,
+                        loadedImages.bracelets,
+                        loadedImages.wings,
+                        loadedImages.bag,
+                        loadedImages.gloves,
+                        loadedImages.handheld,
+                        loadedImages.tattoosHead,
+                        loadedImages.tattoosNeck,
+                        loadedImages.tattoosChest,
+                        loadedImages.tattoosStomach,
+                        loadedImages.tattoosBackUpper,
+                        loadedImages.tattoosBackLower,
+                        loadedImages.tattoosArmRight,
+                        loadedImages.tattoosArmLeft,
+                        loadedImages.tattoosLegRight,
+                        loadedImages.tattoosLegLeft,
+                        shoesBehindPants
+                    )
+
+                    // Generate thumbnail from sprite sheet
+                    const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
+
+                    // Upload generated images
+                    user.clothing = await uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+                    user.thumbnail = await uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+                    user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "DONT", undefined, user.username)
+
+                    // Update user asynchronously
+                    await User.updateOne(
+                        { username: user.username },
+                        {
+                            customizationHash: hash,
+                            clothing: user.clothing,
+                            thumbnail: user.thumbnail,
+                            avatar: user.avatar
+                        },
+                        { timestamps: false }
+                    ).catch(console.error)
+
+                    if (type === 'sprite') {
+                        const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+                        return res.status(307).redirect(signedUrl)
+                    }
+                }
+                catch (error) {
+                    console.error('Error generating sprite sheet:', error)
+                }
             }
         }
         catch (error) {
@@ -283,6 +340,129 @@ const getImage = async (item) => {
         console.error(`Failed to load image for ${item}:`, error.message)
         return null
     }
+}
+
+const generateDirectionalAvatar = async (direction, ...layers) => {
+    // Canvas size for single direction (425x850)
+    const canvas = createCanvas(425, 850)
+    const ctx = canvas.getContext('2d')
+    
+    // Calculate x offset based on direction (0-5)
+    const sourceX = direction * 425
+    
+    // Different layer orders based on direction
+    const getFacingOrder = (direction) => {
+        // Forward-facing (0)
+        if (direction === 0) {
+            return [
+                'base', 'tattoos', 'makeup', 'eyes', 'eyebrows', 'head', 'nose', 'mouth',
+                'beard', 'hair', 'hat', 'piercings', 'earPiece', 'glasses', 'horns',
+                'bracelets', 'socks', 'shoes', 'bottom', 'belt', 'gloves', 'handheld',
+                'top', 'necklace', 'neckwear', 'coat', 'wings', 'bag'
+            ]
+        }
+        // Side views (1, 2, 4, 5)
+        else if ([1, 2, 4, 5].includes(direction)) {
+            return [
+                'base', 'tattoos', 'makeup', 'eyes', 'eyebrows', 'head', 'nose', 'mouth',
+                'beard', 'bracelets', 'socks', 'shoes', 'bottom', 'belt', 'gloves',
+                'handheld', 'top', 'necklace', 'neckwear', 'coat', 'hair', 'hat',
+                'piercings', 'earPiece', 'glasses', 'horns', 'wings', 'bag'
+            ]
+        }
+        // Back view (3)
+        else {
+            return [
+                'base', 'tattoos', 'bracelets', 'socks', 'shoes', 'bottom', 'belt',
+                'gloves', 'handheld', 'top', 'necklace', 'neckwear', 'coat', 'hair',
+                'hat', 'piercings', 'earPiece', 'glasses', 'horns', 'wings', 'bag'
+            ]
+        }
+    }
+
+    // Draw layers in the correct order for this direction
+    const layerOrder = getFacingOrder(direction)
+    for (const layerName of layerOrder) {
+        const layer = layers[layerName]
+        if (!layer) continue
+
+        // Special handling for layers that need masking
+        if ((layerName === 'hair' && layers.hat) || 
+            (layerName === 'top' && layers.coat)) {
+            
+            let processedLayer
+            if (layerName === 'hair') {
+                processedLayer = await removePixelsByImage(layer, layers.hat)
+            } else if (layerName === 'top') {
+                processedLayer = await removePixelsByImage(layer, layers.coat)
+            }
+            processedLayer = await loadImage(processedLayer)
+            ctx.drawImage(processedLayer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+            
+            // Draw the masking layer immediately after
+            const maskingLayer = layerName === 'hair' ? layers.hat : layers.coat
+            const processedMask = await removePixelsByColor(maskingLayer)
+            const loadedMask = await loadImage(processedMask)
+            ctx.drawImage(loadedMask, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        // Normal layer drawing
+        else {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+    }
+
+    return canvas.toBuffer()
+}
+
+const generateFullSpriteSheet = async (base, makeup, hair, beard, eyes, eyebrows, 
+    head, nose, mouth, hat, piercings, earPiece, glasses, horns, top, necklace, 
+    neckwear, coat, belt, bottom, socks, shoes, bracelets, wings, bag, gloves, 
+    handheld, tattoosHead, tattoosNeck, tattoosChest, tattoosStomach, 
+    tattoosBackUpper, tattoosBackLower, tattoosArmRight, tattoosArmLeft, 
+    tattoosLegRight, tattoosLegLeft, shoesBehindPants) => {
+    
+    // Final sprite sheet canvas
+    const canvas = createCanvas(2550, 850)
+    const ctx = canvas.getContext('2d')
+
+    // Combine all tattoos into a single layer for simplicity
+    const combineTattoos = async (...tattooLayers) => {
+        const tattooCanvas = createCanvas(2550, 850)
+        const tattooCtx = tattooCanvas.getContext('2d')
+        
+        for (const tattoo of tattooLayers) {
+            if (tattoo) {
+                tattooCtx.drawImage(tattoo, 0, 0)
+            }
+        }
+        
+        return await loadImage(tattooCanvas.toBuffer())
+    }
+
+    const tattoos = await combineTattoos(
+        tattoosHead, tattoosNeck, tattoosChest, tattoosStomach,
+        tattoosBackUpper, tattoosBackLower, tattoosArmRight,
+        tattoosArmLeft, tattoosLegRight, tattoosLegLeft
+    )
+
+    // Create a layers object for easier handling
+    const layers = {
+        base, makeup, hair, beard, eyes, eyebrows, head, nose, mouth,
+        hat, piercings, earPiece, glasses, horns, top, necklace,
+        neckwear, coat, belt, bottom, socks, shoes, bracelets,
+        wings, bag, gloves, handheld, tattoos
+    }
+
+    // Generate each direction
+    for (let direction = 0; direction < 6; direction++) {
+        const directionCanvas = await generateDirectionalAvatar(direction, layers)
+        ctx.drawImage(
+            await loadImage(directionCanvas),
+            direction * 425, 0  // Place each direction in its correct position
+        )
+    }
+
+    return canvas.toBuffer()
 }
 
 /**
@@ -583,7 +763,6 @@ const cleanupOldAvatars = async () => {
 
 // Run cleanup periodically
 setInterval(cleanupOldAvatars, 24 * 60 * 60 * 1000) // Once per day
-
 
 /**
  * Clears all caches: memory caches and disk cache
