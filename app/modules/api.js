@@ -223,6 +223,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                     user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "DONT", undefined, user.username)
 
                     // Update user asynchronously
+                    const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
                     await User.updateOne(
                         { username: user.username },
                         {
@@ -377,7 +378,11 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
     // Draw layers in the correct order for this direction
     const layerOrder = getFacingOrder(direction)
     for (const layerName of layerOrder) {
-        const layer = layers[layerName]
+        let layer = null
+        if (layerName == 'shoes_before' || layerName == 'shoes_after')
+            layer = layers["shoes"]
+        else
+            layer = layers[layerName]
         if (!layer) continue
 
         // Special handling for layers that need masking
