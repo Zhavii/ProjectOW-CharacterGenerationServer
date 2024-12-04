@@ -187,7 +187,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             }
             
             // Add shoesBehindPants to layers for reference
-            loadedImages.shoesBehindPants = shoesBehindPants
+            //loadedImages.shoesBehindPants = shoesBehindPants
 
             // Generate front-facing avatar for thumbnail
             const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages)
@@ -212,7 +212,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             // Generate full sprite sheet asynchronously
             if (type === 'sprite') {
                 try {
-                    const spriteSheet = await generateFullSpriteSheet(loadedImages)
+                    const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants)
                     
                     // Generate thumbnail from sprite sheet
                     const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
@@ -306,7 +306,7 @@ const getImage = async (item) => {
     }
 }
 
-const generateDirectionalAvatar = async (direction, layers) => {
+const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) => {
     // Canvas size for single direction (425x850)
     const canvas = createCanvas(425, 850)
     const ctx = canvas.getContext('2d')
@@ -319,27 +319,57 @@ const generateDirectionalAvatar = async (direction, layers) => {
         // Forward-facing (0)
         if (direction === 0) {
             return [
-                'base', 'tattoos', 'makeup', 'eyes', 'eyebrows', 'head', 'nose', 'mouth',
-                'beard', 'hair', 'hat', 'piercings', 'earPiece', 'glasses', 'horns',
-                'bracelets', 'socks', 'shoes', 'bottom', 'belt', 'gloves', 'handheld',
-                'top', 'necklace', 'neckwear', 'coat', 'wings', 'bag'
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "piercings", "earPiece", "glasses",
+                "hair", "hat", "horns",
+                "bracelets", "socks",
+                "shoes_before",
+                "bottom", "belt",
+                "shoes_after",
+                "gloves", "handheld",
+                "top", "necklace", "neckwear", "coat",
+                "wings", "bag"
             ]
         }
         // Side views (1, 2, 4, 5)
         else if ([1, 2, 4, 5].includes(direction)) {
             return [
-                'base', 'tattoos', 'makeup', 'eyes', 'eyebrows', 'head', 'nose', 'mouth',
-                'beard', 'bracelets', 'socks', 'shoes', 'bottom', 'belt', 'gloves',
-                'handheld', 'top', 'necklace', 'neckwear', 'coat', 'hair', 'hat',
-                'piercings', 'earPiece', 'glasses', 'horns', 'wings', 'bag'
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "piercings", "earPiece", "glasses",
+                "hair", "hat", "horns",
+                "bracelets", "socks",
+                "shoes_before",
+                "bottom", "belt",
+                "shoes_after",
+                "gloves", "handheld",
+                "top", "necklace", "neckwear", "coat",
+                "wings", "bag"
             ]
         }
         // Back view (3)
         else {
             return [
-                'base', 'tattoos', 'head', 'beard', 'bracelets', 'socks', 'shoes', 'bottom', 'belt',
-                'gloves', 'handheld', 'top', 'necklace', 'neckwear', 'coat', 'hair',
-                'hat', 'piercings', 'earPiece', 'glasses', 'horns', 'wings', 'bag'
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "bracelets", "socks",
+                "shoes_before",
+                "bottom", "belt",
+                "shoes_after",
+                "gloves", "handheld",
+                "top", "necklace", "neckwear", "coat",
+                "piercings", "earPiece", "glasses",
+                "horns", "hair", "hat",
+                "wings", "bag"
             ]
         }
     }
@@ -369,6 +399,13 @@ const generateDirectionalAvatar = async (direction, layers) => {
             const loadedMask = await loadImage(processedMask)
             ctx.drawImage(loadedMask, sourceX, 0, 425, 850, 0, 0, 425, 850)
         }
+        // Special handling for shoes behind pants
+        else if (layerName === 'shoes_before' && shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'shoes_after' && !shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
         // Normal layer drawing
         else {
             ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
@@ -378,7 +415,7 @@ const generateDirectionalAvatar = async (direction, layers) => {
     return canvas.toBuffer()
 }
 
-const generateFullSpriteSheet = async (allLayers) => {
+const generateFullSpriteSheet = async (allLayers, shoesBehindPants) => {
     // Final sprite sheet canvas
     const canvas = createCanvas(2550, 850)
     const ctx = canvas.getContext('2d')
@@ -413,7 +450,7 @@ const generateFullSpriteSheet = async (allLayers) => {
 
     // Generate each direction
     for (let direction = 0; direction < 6; direction++) {
-        const directionCanvas = await generateDirectionalAvatar(direction, layers)
+        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants)
         ctx.drawImage(
             await loadImage(directionCanvas),
             direction * 425, 0  // Place each direction in its correct position
