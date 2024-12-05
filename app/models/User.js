@@ -2,6 +2,34 @@ import mongoose from 'mongoose'
 import moment from 'moment'
 import { v4 as uuid } from 'uuid'
 
+// Badge system constants
+const BADGES = {
+    EARLY_ACCESS: 1 << 0,    // Early access participant
+    DONATOR: 1 << 1,        // Supported the platform financially
+    BETA_TESTER: 1 << 2,    // Participated in beta testing
+    CREATOR: 1 << 3,        // Content creator
+    VERIFIED: 1 << 4,       // Verified user
+    FASHION_ICON: 1 << 5,   // Extensive wardrobe collection
+    COLLECTOR: 1 << 6,      // Large item collection
+    CELEBRITY: 1 << 7,      // Recognized community figure
+    AMBASSADOR: 1 << 8,     // Community ambassador
+}
+
+// Achievement badge schema
+const achievementBadgeSchema = new mongoose.Schema({
+    type: { type: String, required: true },
+    earnedAt: { type: Date, default: Date.now },
+    progress: { type: Number, default: 0 },
+    maxProgress: { type: Number, required: true },
+    level: { type: Number, default: 1 },
+    metadata: {
+        title: { type: String, required: true },
+        description: { type: String, required: true },
+        icon: { type: String, required: true },
+        rarityTier: { type: String, enum: ['common', 'rare', 'epic', 'legendary'], default: 'common' }
+    }
+})
+
 const userSchema = new mongoose.Schema({
     googleId: { type: String, require: false },
     profileImage: { type: String, required: false },
@@ -23,6 +51,15 @@ const userSchema = new mongoose.Schema({
     gems: { type: Number, default: 50 },
     xp: { type: Number, default: 1 },
 
+    // Badge system fields
+    badges: { type: Number, default: 0 },
+    achievementBadges: [achievementBadgeSchema],
+    badgeHistory: [{
+        badge: { type: String, required: true },
+        earnedAt: { type: Date, default: Date.now },
+        source: { type: String }
+    }],
+
     sessionKey: { type: String },
     sessionExpire: { type: Date },
     resetLink: { type: String, default: '' },
@@ -42,28 +79,6 @@ const userSchema = new mongoose.Schema({
         beard: { type: mongoose.Types.ObjectId, ref: 'Item' },
         eyes: { type: mongoose.Types.ObjectId, ref: 'Item' },
         eyebrows: { type: mongoose.Types.ObjectId, ref: 'Item' },
-        
-        /*
-        hair: { 
-            item: { type: mongoose.Types.ObjectId, ref: 'Item' },
-            color: { type: String, default: '#572d0f' }
-        },
-        beard: { 
-            item: { type: mongoose.Types.ObjectId, ref: 'Item' },
-            color: { type: String, default: '#572d0f' }
-        },
-        eyes: { 
-            item: { type: mongoose.Types.ObjectId, ref: 'Item' },
-            color: { type: String, default: '#572d0f' },
-            spread: { type: Number, default: 0 },
-            height: { type: Number, default: 0 },
-            size: { type: Number, default: 0 },
-        },
-        eyebrows: { 
-            item: { type: mongoose.Types.ObjectId, ref: 'Item' },
-            color: { type: String, default: '#572d0f' }
-        },
-        */
 
         head: { type: mongoose.Types.ObjectId, ref: 'Item' },
         nose: { type: mongoose.Types.ObjectId, ref: 'Item' },
@@ -120,6 +135,7 @@ const userSchema = new mongoose.Schema({
         bioColor: { type: String, default: '' },
         match: { type: mongoose.Types.ObjectId, ref: 'User' },
         location: { type: String, default: 'The Moon' },
+        badges: [{ type: Number }]
     },
 
     activePetIndex: { type: Number, default: 0 },
