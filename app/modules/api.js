@@ -185,12 +185,13 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 const pants = await Item.findById(user.customization.bottom, 'description').lean()
                 shoesBehindPants = pants.description.includes('!x')
             }
+            console.log(`Shoes behind pants: ${shoesBehindPants}`)
             
             // Add shoesBehindPants to layers for reference
             //loadedImages.shoesBehindPants = shoesBehindPants
 
             // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages)
+            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants)
             const frontFacingBuffer = await sharp(frontFacingAvatar)
                 .webp({ quality: 100 })
                 .toBuffer()
@@ -379,7 +380,9 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
     const layerOrder = getFacingOrder(direction)
     for (const layerName of layerOrder) {
         let layer = null
-        if (layerName == 'shoes_before' || layerName == 'shoes_after')
+        if (layerName == 'shoes_before' && !shoesBehindPants)
+            layer = layers["shoes"]
+        else if (layerName == 'shoes_after' && shoesBehindPants)
             layer = layers["shoes"]
         else
             layer = layers[layerName]
@@ -405,10 +408,10 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
             ctx.drawImage(loadedMask, sourceX, 0, 425, 850, 0, 0, 425, 850)
         }
         // Special handling for shoes behind pants
-        else if (layerName === 'shoes_before' && shoesBehindPants) {
+        else if (layerName === 'shoes_before' && !shoesBehindPants) {
             ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
         }
-        else if (layerName === 'shoes_after' && !shoesBehindPants) {
+        else if (layerName === 'shoes_after' && shoesBehindPants) {
             ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
         }
         // Normal layer drawing
