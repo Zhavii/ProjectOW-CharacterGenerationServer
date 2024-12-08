@@ -185,7 +185,6 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 const pants = await Item.findById(user.customization.bottom, 'description').lean()
                 shoesBehindPants = pants.description.includes('!x')
             }
-            console.log(`Shoes behind pants: ${shoesBehindPants}`)
             
             // Add shoesBehindPants to layers for reference
             //loadedImages.shoesBehindPants = shoesBehindPants
@@ -337,8 +336,8 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "wings", "bag"
             ]
         }
-        // Side views (1, 2, 4, 5)
-        else if ([1, 2, 4, 5].includes(direction)) {
+        // Side views (1, 5)
+        else if ([1, 5].includes(direction)) {
             return [
                 "base",
                 "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
@@ -353,6 +352,24 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "shoes_after",
                 "gloves", "handheld",
                 "top", "necklace", "neckwear", "coat",
+                "wings", "bag"
+            ]
+        }
+        else if ([2, 4].includes(direction)) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "piercings", "earPiece", "glasses",
+                "bracelets", "socks",
+                "shoes_before",
+                "bottom", "belt",
+                "shoes_after",
+                "gloves", "handheld",
+                "top", "necklace", "neckwear", "coat",
+                "hair", "hat", "horns",
                 "wings", "bag"
             ]
         }
