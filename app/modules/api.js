@@ -167,16 +167,16 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 gloves: await getImage(user.customization.gloves),
                 handheld: await getImage(user.customization.handheld),
                 // Load tattoos
-                tattoosHead: await getImage(user.customization.tattoos?.head),
-                tattoosNeck: await getImage(user.customization.tattoos?.neck),
-                tattoosChest: await getImage(user.customization.tattoos?.chest),
-                tattoosStomach: await getImage(user.customization.tattoos?.stomach),
-                tattoosBackUpper: await getImage(user.customization.tattoos?.backUpper),
-                tattoosBackLower: await getImage(user.customization.tattoos?.backLower),
-                tattoosArmRight: await getImage(user.customization.tattoos?.armRight),
-                tattoosArmLeft: await getImage(user.customization.tattoos?.armLeft),
-                tattoosLegRight: await getImage(user.customization.tattoos?.legRight),
-                tattoosLegLeft: await getImage(user.customization.tattoos?.legLeft)
+                tattoo_head: await getImage(user.customization.tattoos?.head),
+                tattoo_neck: await getImage(user.customization.tattoos?.neck),
+                tattoo_chest: await getImage(user.customization.tattoos?.chest),
+                tattoo_stomach: await getImage(user.customization.tattoos?.stomach),
+                tattoo_backUpper: await getImage(user.customization.tattoos?.backUpper),
+                tattoo_backLower: await getImage(user.customization.tattoos?.backLower),
+                tattoo_armRight: await getImage(user.customization.tattoos?.armRight),
+                tattoo_armLeft: await getImage(user.customization.tattoos?.armLeft),
+                tattoo_legRight: await getImage(user.customization.tattoos?.legRight),
+                tattoo_legLeft: await getImage(user.customization.tattoos?.legLeft)
             }
 
             // Check if shoes should be behind pants
@@ -191,9 +191,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 
             // Generate front-facing avatar for thumbnail
             const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants)
-            const frontFacingBuffer = await sharp(frontFacingAvatar)
-                .webp({ quality: 100 })
-                .toBuffer()
+            const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 100 }).toBuffer()
 
             try {
                 const avatarsDir = path.join(process.cwd(), 'avatars')
