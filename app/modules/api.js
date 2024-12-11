@@ -185,12 +185,15 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 const pants = await Item.findById(user.customization.bottom, 'description').lean()
                 shoesBehindPants = pants.description.includes('!x')
             }
-            
-            // Add shoesBehindPants to layers for reference
-            //loadedImages.shoesBehindPants = shoesBehindPants
+
+            let hairInfrontTop = false
+            if (user.customization.hair) {
+                const hair = await Item.findById(user.customization.hair, 'description').lean()
+                hairInfrontTop = hair.description.includes('!s')
+            }
 
             // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants)
+            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 100 }).toBuffer()
 
             try {
@@ -210,7 +213,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             // Generate full sprite sheet asynchronously
             if (type === 'sprite') {
                 try {
-                    const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants)
+                    const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
                     
                     // Generate thumbnail from sprite sheet
                     const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
@@ -305,7 +308,7 @@ const getImage = async (item) => {
     }
 }
 
-const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) => {
+const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
     // Canvas size for single direction (425x850)
     const canvas = createCanvas(425, 850)
     const ctx = canvas.getContext('2d')
@@ -324,18 +327,19 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
                 "piercings", "earPiece", "glasses",
-                "hair", "hat", "horns",
+                "hair_behind",
                 "bracelets", "socks",
                 "shoes_before",
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
-                "top", "necklace", "neckwear", "coat",
+                "top", 
+                "necklace", "neckwear", "coat", "hair_infront", "hat", "horns",
                 "wings", "bag"
             ]
         }
         // Side views (1, 5)
-        else if ([1, 5].includes(direction)) {
+        else if ([1, 4].includes(direction)) {
             return [
                 "base",
                 "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
@@ -343,17 +347,18 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
                 "piercings", "earPiece", "glasses",
-                "hair", "hat", "horns",
+                "hair_behind",
                 "bracelets", "socks",
                 "shoes_before",
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
-                "top", "necklace", "neckwear", "coat",
+                "top",
+                "necklace", "neckwear", "coat", "hair_infront", "hat", "horns",
                 "wings", "bag"
             ]
         }
-        else if ([2, 4].includes(direction)) {
+        else if ([2, 5].includes(direction)) {
             return [
                 "base",
                 "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
@@ -366,8 +371,8 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
-                "top", "necklace", "neckwear", "coat",
-                "hair", "hat", "horns",
+                "top", "hair_behind", "necklace", "neckwear", 
+                "coat", "hair_infront", "hat", "horns",
                 "wings", "bag"
             ]
         }
@@ -383,9 +388,10 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
+                "hair_infront",
                 "top", "necklace", "neckwear", "coat",
                 "piercings", "earPiece", "glasses",
-                "horns", "hair", "hat",
+                "horns", "hair_behind", "hat",
                 "wings", "bag"
             ]
         }
@@ -399,11 +405,16 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
             layer = layers["shoes"]
         else if (layerName == 'shoes_after' && shoesBehindPants)
             layer = layers["shoes"]
+        else if (layerName == 'hair_behind' && !hairInfrontTop)
+            layer = layers["hair"]
+        else if (layerName == 'hair_infront' && hairInfrontTop)
+            layer = layers["hair"]
         else
             layer = layers[layerName]
         if (!layer) continue
 
         // Special handling for layers that need masking
+        /*
         if ((layerName === 'hair' && layers.hat) || 
             (layerName === 'top' && layers.coat)) {
             
@@ -422,6 +433,13 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
             const loadedMask = await loadImage(processedMask)
             ctx.drawImage(loadedMask, sourceX, 0, 425, 850, 0, 0, 425, 850)
         }
+        */
+        if (layerName === 'hair_behind' && !hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'hair_infront' && hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
         // Special handling for shoes behind pants
         else if (layerName === 'shoes_before' && !shoesBehindPants) {
             ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
@@ -438,7 +456,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants) =>
     return canvas.toBuffer()
 }
 
-const generateFullSpriteSheet = async (allLayers, shoesBehindPants) => {
+const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontTop) => {
     // Final sprite sheet canvas
     const canvas = createCanvas(2550, 850)
     const ctx = canvas.getContext('2d')
@@ -473,7 +491,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants) => {
 
     // Generate each direction
     for (let direction = 0; direction < 6; direction++) {
-        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants)
+        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
         ctx.drawImage(
             await loadImage(directionCanvas),
             direction * 425, 0  // Place each direction in its correct position
