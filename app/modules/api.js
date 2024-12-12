@@ -327,14 +327,14 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
                 "glasses",
-                "hair_behind", "piercings", "earPiece",
+                "hair_behind",
                 "bracelets", "socks",
                 "shoes_before",
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
                 "top",
-                "necklace", "coat", "neckwear", "hair_infront", "hat", "horns",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
                 "wings", "bag"
             ]
         }
@@ -346,14 +346,14 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
                 "glasses",
-                "hair_behind", "piercings", "earPiece",
+                "hair_behind",
                 "bracelets", "socks",
                 "shoes_before",
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
                 "top",
-                "necklace", "coat", "neckwear", "hair_infront", "hat", "horns",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
                 "wings", "bag"
             ]
         }
@@ -370,8 +370,8 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "bottom", "belt",
                 "shoes_after",
                 "gloves", "handheld",
-                "top", "hair_behind", "piercings", "earPiece", "necklace",
-                "coat", "neckwear", "hair_infront", "hat", "horns",
+                "top", "necklace",
+                "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
                 "wings", "bag"
             ]
         }
@@ -389,8 +389,8 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "gloves", "handheld",
                 "piercings", "earPiece", "glasses",
                 "hair_infront",
-                "top", "necklace", "coat", "neckwear",
-                "horns", "hair_behind", "hat",
+                "top", "necklace", "coat",
+                "horns", "hair_behind", "hat", "neckwear",
                 "wings", "bag"
             ]
         }
