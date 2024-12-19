@@ -31,34 +31,40 @@ const uploadImage = (previousMedia, file, location, maxSize, resizePixels, error
     }
 
     return new Promise(async (resolve, reject) => {
-        if (previousMedia != undefined && previousMedia != null && previousMedia != '') {
-            s3.deleteObject({
+        try {
+            if (previousMedia != undefined && previousMedia != null && previousMedia != '') {
+                s3.deleteObject({
+                    Bucket: process.env.DO_SPACE_NAME,
+                    Key: previousMedia
+                }, async (err, data) => {
+                    if (err) console.log(err)
+                })
+            }
+
+            let data = file.data
+            if (resizePixels == "DONT") {
+                data = await sharp(data).webp({ quality: 100 }).toBuffer()
+            }
+            else if (resizePixels != undefined && resizePixels != null && resizePixels != '') {
+                data = await sharp(data).resize(resizePixels ? resizePixels : 512).webp({ quality: 75 }).toBuffer()
+            }
+            else {
+                data = await sharp(data).webp({ quality: 75 }).toBuffer()
+            }
+
+            const uploadData = {
                 Bucket: process.env.DO_SPACE_NAME,
-                Key: previousMedia
-            }, async (err, data) => {
-                if (err) console.log(err)
-            })
+                Body: data,
+                ACL: 'public-read'/*'private'*/,
+                Key: `${location}/${fileName ? fileName : uuid()}.webp` //`${location}/${fileName ? fileName : uuid()}${path.extname(file.name)}` 
+            }
+            const uploadDone = await s3.upload(uploadData).promise()
+            resolve(uploadDone.Key)
         }
-
-        let data = file.data
-        if (resizePixels == "DONT") {
-            data = await sharp(data).webp({ quality: 100 }).toBuffer()
+        catch (error) {
+            console.log(error)
+            reject(error)
         }
-        else if (resizePixels != undefined && resizePixels != null && resizePixels != '') {
-            data = await sharp(data).resize(resizePixels ? resizePixels : 512).webp({ quality: 75 }).toBuffer()
-        }
-        else {
-            data = await sharp(data).webp({ quality: 75 }).toBuffer()
-        }
-
-        const uploadData = {
-            Bucket: process.env.DO_SPACE_NAME,
-            Body: data,
-            ACL: 'public-read'/*'private'*/,
-            Key: `${location}/${fileName ? fileName : uuid()}.webp` //`${location}/${fileName ? fileName : uuid()}${path.extname(file.name)}` 
-        }
-        const uploadDone = await s3.upload(uploadData).promise()
-        resolve(uploadDone.Key)
     })
 }
 
