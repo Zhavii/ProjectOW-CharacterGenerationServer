@@ -270,8 +270,8 @@ const getImage = async (item) => {
     const cacheKey = item.toLowerCase()
 
     // Check memory cache first
-    const memCached = memoryCache.get(cacheKey)
-    if (memCached) return memCached
+    //const memCached = memoryCache.get(cacheKey)
+    //if (memCached) return memCached
 
     try {
         const diskCacheKey = crypto.createHash('md5').update(cacheKey).digest('hex')
@@ -297,7 +297,7 @@ const getImage = async (item) => {
         const image = await loadImage(pngBuffer)
 
         // Store in both caches
-        memoryCache.set(cacheKey, image)
+        //memoryCache.set(cacheKey, image)
         await fs.writeFile(diskCachePath, pngBuffer)
 
         return image
