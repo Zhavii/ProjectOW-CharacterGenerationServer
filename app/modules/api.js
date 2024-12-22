@@ -22,7 +22,7 @@ const s3 = new AWS.S3({
 
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
-    max: 1000, // Adjust based on memory constraints
+    max: 300, // Adjust based on memory constraints
     ttl: 1000 * 60 * 60, // 1 hour TTL
     updateAgeOnGet: true
 })
@@ -254,7 +254,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 }
 
 const memoryCache = new LRUCache({
-    max: 1000,
+    max: 300,
 })
 
 const CACHE_DIR = path.join(process.cwd(), 'cache');
