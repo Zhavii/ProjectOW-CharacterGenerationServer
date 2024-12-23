@@ -76,9 +76,9 @@ jobs:
             rm -rf ~/myapp &&
             mv ~/temp_deploy ~/myapp &&
 
-            # Start the application
+            # Start the application with the working configuration
             cd ~/myapp &&
-            pm2 start app/app.js --name app -f &&
+            NODE_ENV=production pm2 start app/app.js --name app --time --watch &&
             pm2 save &&
             
             # Verify the application is running
