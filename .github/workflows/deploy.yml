@@ -25,6 +25,18 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/deploy_key
           
+      # First, copy the files to the server
+      - name: Copy Files to VM
+        env:
+          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
+          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
+        run: |
+          # Create a tar of the current directory
+          tar -czf deploy.tar.gz .
+          
+          # Copy the tar to the server
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
+          
       - name: Deploy to VM
         env:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
@@ -36,32 +48,15 @@ jobs:
             # Kill any existing node processes
             sudo pkill node || true
 
-            # Clean up PM2 and Node
+            # Clean up PM2
             sudo pm2 delete all || true
-            sudo rm -rf ~/.pm2
-            sudo rm -rf /usr/lib/node_modules/pm2
-            sudo npm cache clean -f
-
-            # Clean up temporary directory if it exists
+            
+            # Extract the new files to a temp directory
             rm -rf ~/temp_deploy
-
-            # Install Node.js fresh
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
-            sudo apt-get install -y nodejs
-
-            # Install and initialize PM2
-            sudo npm install -g pm2
-            cd ~
-            pm2 startup ubuntu
-            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser
-
-            # Create and move to temporary directory
             mkdir -p ~/temp_deploy
             cd ~/temp_deploy
-
-            # Clone the repository
-            git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' .
-
+            tar -xzf ~/deploy.tar.gz
+            
             # Create .env file with secrets
             cat > .env << 'EOL'
             CENTRAL_SERVER="${{ secrets.CENTRAL_SERVER }}"
@@ -77,15 +72,17 @@ jobs:
             # Install dependencies
             npm ci --production
 
-            # Safely move the new version into place
+            # Backup current app if it exists
             if [ -d ~/myapp ]; then
               rm -rf ~/myapp.old || true
               mv ~/myapp ~/myapp.old
             fi
+
+            # Move new version into place
             mv ~/temp_deploy ~/myapp
 
-            # Cleanup old backup if exists
-            rm -rf ~/myapp.old || true
+            # Cleanup
+            rm -rf ~/myapp.old ~/deploy.tar.gz || true
 
             # Start the application
             cd ~/myapp
