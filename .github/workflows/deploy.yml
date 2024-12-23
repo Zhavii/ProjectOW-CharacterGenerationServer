@@ -31,11 +31,10 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-            # Stop all running processes first
-            pm2 kill || true
+            # Kill any existing node processes
             sudo pkill node || true
-            
-            # Clean up PM2
+
+            # Clean up PM2 and Node
             sudo rm -rf ~/.pm2
             sudo rm -rf /usr/lib/node_modules/pm2
             sudo npm cache clean -f
@@ -44,14 +43,13 @@ jobs:
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
             sudo apt-get install -y nodejs &&
 
-            # Install PM2
+            # Install and initialize PM2
             sudo npm install -g pm2 &&
             cd ~ &&
             pm2 startup ubuntu &&
             sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser &&
 
-            # Prepare deployment directory
-            rm -rf ~/temp_deploy &&
+            # Create a temporary directory for the new deployment
             mkdir -p ~/temp_deploy &&
             cd ~/temp_deploy &&
 
@@ -77,13 +75,39 @@ jobs:
             rm -rf ~/myapp &&
             mv ~/temp_deploy ~/myapp &&
 
-            # Start the application
+            # Start the application with the working configuration
             cd ~/myapp &&
-            sleep 10 &&
-            NODE_ENV=production pm2 start app/app.js --name app --time &&
             pm2 save &&
             
-            # Wait for startup and verify status
-            sleep 10 &&
-            pm2 status &&
-            pm2 logs --lines 20"
+            # Verify the application is running
+            pm2 list &&
+            echo 'Deployment completed. Checking application status...' &&
+            sleep 5 &&
+            pm2 status"
+
+  run:
+    needs: deploy
+    if: ${{ needs.deploy.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Setup SSH Key
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/deploy_key
+          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/deploy_key
+          
+      - name: Deploy to VM
+        env:
+          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
+          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
+        run: |
+          for i in 1 2 3; do
+            ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+              cd ~/myapp &&
+              pm2 kill &&
+              sleep 15 &&  # Increased wait time to 15 seconds
+              NODE_ENV=production pm2 start app/app.js --name app --time --watch" && break || sleep 15
+          done
