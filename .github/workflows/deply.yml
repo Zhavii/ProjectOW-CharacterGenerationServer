@@ -66,6 +66,7 @@ jobs:
             DO_SPACE_KEY="${{ secrets.DO_SPACE_KEY }}"
             DO_SPACE_NAME="${{ secrets.DO_SPACE_NAME }}"
             MONGO_URI="${{ secrets.MONGO_URI }}"
+            PORT="${{ secrets.PORT }}"
             EOL
 
             # Install dependencies
