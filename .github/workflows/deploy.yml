@@ -121,8 +121,6 @@ jobs:
               NODE_ENV=production pm2 start app/app.js --name app
               pm2 save
               pm2 list
-              echo 'Recent logs:'
-              pm2 logs --lines 20 || true
             else
               echo 'app.js not found in expected location'
               exit 1
