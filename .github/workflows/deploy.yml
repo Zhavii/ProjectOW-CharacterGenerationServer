@@ -104,4 +104,5 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+            cd ~/myapp &&
             NODE_ENV=production pm2 start app/app.js --name app --time --watch"
