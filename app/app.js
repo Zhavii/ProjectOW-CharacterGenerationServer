@@ -5,11 +5,6 @@ import bodyParser from 'body-parser'
 import mongoSanitize from 'express-mongo-sanitize'
 import multer from 'multer'
 import os from 'os'
-import fs from 'fs'
-import https from 'https'
-
-import User from './models/User.js'
-import Item from './models/Item.js'
 
 const app = express()
 
@@ -40,11 +35,11 @@ function monitorResources() {
     const totalMemoryMB = Math.round(totalMemory / 1024 / 1024)
     
     console.log(`
-Resource Usage:
-CPU: ${cpuUsage}%
-Memory: ${memoryUsage}% (${usedMemoryMB}MB / ${totalMemoryMB}MB)
-Timestamp: ${new Date().toISOString()}
----------------------------------------`)
+        Resource Usage:
+        CPU: ${cpuUsage}%
+        Memory: ${memoryUsage}% (${usedMemoryMB}MB / ${totalMemoryMB}MB)
+        Timestamp: ${new Date().toISOString()}
+        ---------------------------------------`)
 }
 
 // Start monitoring every 10 seconds
@@ -66,16 +61,7 @@ app.use(mongoSanitize({ replaceWith: '_', allowDots: true }))
 
 await connectDB()
 
-if (process.platform !== 'win32') {
-    const cts = {
-        cert: fs.readFileSync('/etc/letsencrypt/live/pow-cc.eastus.cloudapp.azure.com/fullchain.pem'),
-        key: fs.readFileSync(' /etc/letsencrypt/live/pow-cc.eastus.cloudapp.azure.com/privkey.pem')
-    }
-    https.createServer(cts, app).listen(process.env.PORT)
-}
-else {
-    app.listen(process.env.PORT)
-}
+app.listen(process.env.PORT)
 console.log(`Is Windows: ${process.platform === 'win32'}`)
 console.log(`Server started @ ${process.env.PORT}`)
 
