@@ -32,15 +32,20 @@ jobs:
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
             sudo apt-get install -y nodejs &&
             
-            # Deploy application
-            rm -rf ~/myapp &&
+            # Create directory first and cd into it
             mkdir -p ~/myapp &&
             cd ~/myapp &&
+            
+            # Remove contents but not the directory itself
+            rm -rf * &&
+            
+            # Deploy application
             git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
             npm ci --production &&
             
             # Stop any existing PM2 processes and start fresh
             sudo npm install -g pm2 &&
-            pm2 delete app || true &&  # Delete existing process if any, don't fail if not found
-            pm2 start app/app.js &&
-            pm2 save"  # Save the process list
+            pm2 delete app || true &&
+            cd ~/myapp &&  # Ensure we're in the right directory
+            pm2 start app/app.js --name app &&
+            pm2 save"
