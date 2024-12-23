@@ -66,7 +66,6 @@ app.use(mongoSanitize({ replaceWith: '_', allowDots: true }))
 
 await connectDB()
 
-
 if (process.platform !== 'win32') {
     const cts = {
         cert: fs.readFileSync('/etc/letsencrypt/live/pow-cc.eastus.cloudapp.azure.com/fullchain.pem'),

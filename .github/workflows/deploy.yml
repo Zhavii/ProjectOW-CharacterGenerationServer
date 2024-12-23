@@ -84,7 +84,6 @@ jobs:
             echo 'Deployment completed. Checking application status...' &&
             sleep 5 &&
             pm2 status"
-
   run:
     needs: deploy
     if: ${{ needs.deploy.result == 'success' }}
@@ -104,10 +103,7 @@ jobs:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          for i in 1 2 3; do
-            ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-              cd ~/myapp &&
-              pm2 kill &&
-              sleep 15 &&  # Increased wait time to 15 seconds
-              NODE_ENV=production pm2 start app/app.js --name app --time --watch" && break || sleep 15
-          done
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+            cd ~/myapp &&
+            pm2 kill &&
+            NODE_ENV=production pm2 start app/app.js --name app --time"
