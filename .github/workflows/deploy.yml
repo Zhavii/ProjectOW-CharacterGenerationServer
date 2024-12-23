@@ -123,12 +123,21 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
             cd ~/myapp
             
-            # Check the deployed file
+            echo 'Current app.js contents:'
+            cat app/app.js
+            
+            echo 'Checking for imports...'
+            grep 'import' app/app.js
+            
             echo 'Checking if the HTTPS server code is present...'
-            if grep -q 'https.createServer' app/app.js; then
+            if grep -q 'import https from' app/app.js && grep -q 'https.createServer' app/app.js; then
               echo 'HTTPS server code found'
             else
-              echo 'HTTPS server code not found - deployment may have failed'
+              echo 'HTTPS server code not found - checking deployment status'
+              ls -la ~/temp_deploy
+              ls -la ~/myapp
+              echo 'Checking rsync status in deployment logs'
+              tail -n 100 ~/.pm2/pm2.log
               exit 1
             fi
             
