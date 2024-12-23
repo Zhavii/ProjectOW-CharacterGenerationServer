@@ -90,6 +90,13 @@ jobs:
       if: ${{ needs.deploy.result == 'success' }}
       runs-on: ubuntu-latest
       steps:
+        - name: Setup SSH Key
+          run: |
+            install -m 600 -D /dev/null ~/.ssh/deploy_key
+            echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
+            eval "$(ssh-agent -s)"
+            ssh-add ~/.ssh/deploy_key
+  
         - name: Wait and Verify Deployment
           env:
             SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
