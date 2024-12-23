@@ -105,19 +105,27 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           echo "Waiting for server to start..."
-          sleep 30
+          sleep 10
           
           echo "Verifying deployment via SSH..."
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
             cd ~/myapp
+            
+            # Start the app if not running
+            if ! pm2 list | grep -q 'app.*online'; then
+              echo 'Starting PM2 process...'
+              NODE_ENV=production pm2 start app/app.js --name app
+              sleep 5
+            fi
+            
+            # Check if process is running
             if pm2 list | grep -q 'app.*online'; then
               echo 'PM2 process is running and online'
+              pm2 save
               exit 0
             else
-              echo 'PM2 process status:'
-              pm2 list
-              echo 'PM2 logs:'
-              pm2 logs --lines 20
+              echo 'PM2 process failed to start. Checking logs:'
+              pm2 logs --lines 50
               exit 1
             fi
           "
