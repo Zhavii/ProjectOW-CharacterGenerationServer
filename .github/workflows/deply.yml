@@ -31,25 +31,34 @@ jobs:
             # Install Node.js and npm if not already installed
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
             sudo apt-get install -y nodejs &&
-            
+
             # Create a temporary directory for the new deployment
             mkdir -p ~/temp_deploy &&
             cd ~/temp_deploy &&
-            
+
             # Clone the repository
             git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
-            
+
+            # Create .env file with secrets
+            echo 'CENTRAL_SERVER=${{ secrets.CENTRAL_SERVER }}' >> .env &&
+            echo 'DO_ENDPOINT=${{ secrets.DO_ENDPOINT }}' > .env &&
+            echo 'DO_SPACE_ENDPOINT=${{ secrets.DO_SPACE_ENDPOINT }}' >> .env &&
+            echo 'DO_SPACE_ID=${{ secrets.DO_SPACE_ID }}' >> .env &&
+            echo 'DO_SPACE_KEY=${{ secrets.DO_SPACE_KEY }}' >> .env &&
+            echo 'DO_SPACE_NAME=${{ secrets.DO_SPACE_NAME }}' >> .env &&
+            echo 'MONGO_URI=${{ secrets.MONGO_URI }}' >> .env &&
+
             # Install dependencies
             npm ci --production &&
-            
+
             # Stop PM2 process
             sudo npm install -g pm2 &&
             pm2 delete app || true &&
-            
+
             # Move the new version into place
             rm -rf ~/myapp &&
             mv ~/temp_deploy ~/myapp &&
-            
+
             # Start the application
             cd ~/myapp &&
             pm2 start app/app.js --name app -f &&
