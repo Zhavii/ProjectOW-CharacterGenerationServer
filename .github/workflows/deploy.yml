@@ -31,7 +31,7 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           # Create tar preserving paths
-          tar -czf deploy.tar.gz --exclude='node_modules' --exclude='.git' .
+          find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -print0 | tar -czf deploy.tar.gz --null -T -
           
           # Copy the tar file to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
