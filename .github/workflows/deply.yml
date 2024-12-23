@@ -1,0 +1,43 @@
+name: Deploy to Azure VM
+
+on:
+  push:
+    branches: [ main ]  # or your default branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '18'
+          
+      - name: Install Dependencies
+        run: npm ci
+        
+      - name: Run Tests
+        run: npm test
+        
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+      - name: Deploy to VM
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
+            cd ~/myapp &&
+            git pull origin main &&
+            npm ci --production &&
+            pm2 restart app ||
+            (
+              mkdir -p ~/myapp &&
+              cd ~/myapp &&
+              git clone ${{ github.server_url }}/${{ github.repository }} . &&
+              npm ci --production &&
+              pm2 start app.js
+            )"

@@ -1,15 +1,52 @@
 import bootstrap from './modules/_bootstrap.js'
 import connectDB from './modules/db.js'
 import express from 'express'
-
 import bodyParser from 'body-parser'
 import mongoSanitize from 'express-mongo-sanitize'
 import multer from 'multer'
+import os from 'os'
 
 import User from './models/User.js'
 import Item from './models/Item.js'
 
 const app = express()
+
+// Resource monitoring function
+function monitorResources() {
+    // Get CPU usage
+    const cpus = os.cpus()
+    let totalIdle = 0
+    let totalTick = 0
+    
+    cpus.forEach(cpu => {
+        for (const type in cpu.times) {
+            totalTick += cpu.times[type]
+        }
+        totalIdle += cpu.times.idle
+    })
+    
+    const cpuUsage = ((1 - totalIdle / totalTick) * 100).toFixed(2)
+    
+    // Get memory usage
+    const totalMemory = os.totalmem()
+    const freeMemory = os.freemem()
+    const usedMemory = totalMemory - freeMemory
+    const memoryUsage = ((usedMemory / totalMemory) * 100).toFixed(2)
+    
+    // Convert to MB for readability
+    const usedMemoryMB = Math.round(usedMemory / 1024 / 1024)
+    const totalMemoryMB = Math.round(totalMemory / 1024 / 1024)
+    
+    console.log(`
+Resource Usage:
+CPU: ${cpuUsage}%
+Memory: ${memoryUsage}% (${usedMemoryMB}MB / ${totalMemoryMB}MB)
+Timestamp: ${new Date().toISOString()}
+----------------------------------------`)
+}
+
+// Start monitoring every 10 seconds
+setInterval(monitorResources, 10000)
 
 // Express Plugins
 app.use(function(req, res, next) {
