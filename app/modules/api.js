@@ -28,7 +28,7 @@ const avatarCache = new LRUCache({
 
 // Pre-initialize sharp for better performance
 sharp.cache(true)
-sharp.concurrency(1) // Adjust based on server CPU cores
+sharp.concurrency(2) // Adjust based on server CPU cores
 
 const getParams = (username) => {
     return {
