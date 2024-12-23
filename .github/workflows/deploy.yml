@@ -30,8 +30,8 @@ jobs:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          # Create tar directly without creating a new directory
-          tar --exclude='node_modules' --exclude='.git' -czf deploy.tar.gz ./*
+          # Create tar preserving paths
+          tar -czf deploy.tar.gz --exclude='node_modules' --exclude='.git' .
           
           # Copy the tar file to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
@@ -49,7 +49,7 @@ jobs:
             mkdir -p ~/temp_deploy
             cd ~/temp_deploy
             
-            # Extract new files
+            # Extract new files preserving paths
             tar -xzf ~/deploy.tar.gz
             rm ~/deploy.tar.gz
             
@@ -70,20 +70,18 @@ jobs:
             
             # Backup and replace application directory
             if [ -d ~/myapp ]; then
+              rm -rf ~/myapp_backup
               mv ~/myapp ~/myapp_backup
             fi
             mv ~/temp_deploy ~/myapp
-            rm -rf ~/myapp_backup
             
             # Start application with PM2
             cd ~/myapp
-            pm2 kill || true
-            pm2 flush
-            pm2 delete all || true
             NODE_ENV=production pm2 start app/app.js --name app
             pm2 save
             
-            # Show PM2 status
+            # Show status
+            echo 'PM2 process list:'
             pm2 list
             "
 
@@ -105,27 +103,28 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           echo "Waiting for server to start..."
-          sleep 10
+          sleep 15
           
           echo "Verifying deployment via SSH..."
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
             cd ~/myapp
             
-            # Start the app if not running
-            if ! pm2 list | grep -q 'app.*online'; then
-              echo 'Starting PM2 process...'
-              NODE_ENV=production pm2 start app/app.js --name app
-              sleep 5
+            # Check app.js exists in correct location
+            if [ ! -f app/app.js ]; then
+              echo 'Error: app.js not found in expected location'
+              ls -R app/
+              exit 1
             fi
             
             # Check if process is running
             if pm2 list | grep -q 'app.*online'; then
               echo 'PM2 process is running and online'
-              pm2 save
               exit 0
             else
-              echo 'PM2 process failed to start. Checking logs:'
-              pm2 logs --lines 50
+              echo 'PM2 process status:'
+              pm2 list
+              echo 'PM2 logs:'
+              pm2 logs app --lines 50
               exit 1
             fi
           "
