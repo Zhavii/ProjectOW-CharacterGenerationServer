@@ -8,94 +8,9 @@ import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import AWS from 'aws-sdk'
-import { Worker } from 'worker_threads'
-import os from 'os'
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
-
-let pool;
-
-class WorkerPool {
-    constructor(workerPath, numWorkers = 4) {
-        this.workers = []
-        this.freeWorkers = []
-        this.queue = []
-        
-        // Initialize worker threads
-        for (let i = 0; i < numWorkers; i++) {
-            const worker = new Worker(workerPath)
-            worker.on('message', (result) => {
-                const callback = worker.currentCallback
-                worker.currentCallback = null
-                this.freeWorkers.push(worker)
-                this.processQueue()
-                callback(null, result)
-            })
-            worker.on('error', (error) => {
-                if (worker.currentCallback) {
-                    worker.currentCallback(error, null)
-                }
-            })
-            this.freeWorkers.push(worker)
-            this.workers.push(worker)
-        }
-    }
-
-    processQueue() {
-        while (this.queue.length > 0 && this.freeWorkers.length > 0) {
-            const worker = this.freeWorkers.pop()
-            const { task, callback } = this.queue.shift()
-            worker.currentCallback = callback
-            worker.postMessage(task)
-        }
-    }
-
-    runTask(task) {
-        return new Promise((resolve, reject) => {
-            const callback = (error, result) => {
-                if (error) reject(error)
-                else resolve(result)
-            }
-            this.queue.push({ task, callback })
-            this.processQueue()
-        })
-    }
-
-    close() {
-        return Promise.all(this.workers.map(async worker => {
-            try {
-                await worker.terminate()
-            } catch (error) {
-                console.error('Error terminating worker:', error)
-            }
-        }))
-    }
-}
-
-// Initialize pool function
-const initializeWorkerPool = () => {
-    if (!pool) {
-        pool = new WorkerPool('./avatarWorker.js', os.cpus().length)
-    }
-    return pool
-}
-
-// Get pool instance when needed
-const getWorkerPool = () => {
-    if (!pool) {
-        return initializeWorkerPool()
-    }
-    return pool
-}
-
-// Add cleanup handler
-process.on('SIGTERM', async () => {
-    if (pool) {
-        await pool.close()
-        pool = null
-    }
-})
 
 const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
 const s3 = new AWS.S3({
@@ -113,7 +28,7 @@ const avatarCache = new LRUCache({
 
 // Pre-initialize sharp for better performance
 sharp.cache(true)
-sharp.concurrency(4) // Adjust based on server CPU cores
+sharp.concurrency(1) // Adjust based on server CPU cores
 
 const getParams = (username) => {
     return {
@@ -257,13 +172,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             }
 
             // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await getWorkerPool().runTask({
-                type: 'direction',
-                direction: 0,
-                layers: loadedImages,
-                shoesBehindPants,
-                hairInfrontTop
-            })
+            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 100 }).toBuffer()
 
             try {
@@ -283,22 +192,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             // Generate full sprite sheet asynchronously
             if (type === 'sprite') {
                 try {
-                    const spriteSheet = await getWorkerPool().runTask({
-                        type: 'spritesheet',
-                        layers: loadedImages,
-                        shoesBehindPants,
-                        hairInfrontTop
-                    })
+                    const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
                     
                     // Generate thumbnail from sprite sheet
-                    const thumbnail = await getWorkerPool().runTask({
-                        type: 'crop',
-                        sourceImage: spriteSheet,
-                        x: 103,
-                        y: 42,
-                        width: 218,
-                        height: 218
-                    })
+                    const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
 
                     // Upload generated images
                     user.clothing = await uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
@@ -387,6 +284,192 @@ const getImage = async (item) => {
     catch (error) {
         console.error(`Failed to load image for ${item}:`, error.message)
         return null
+    }
+}
+
+const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
+    // Canvas size for single direction (425x850)
+    const canvas = createCanvas(425, 850)
+    const ctx = canvas.getContext('2d')
+    
+    // Calculate x offset based on direction (0-5)
+    const sourceX = direction * 425
+    
+    // Different layer orders based on direction
+    const getFacingOrder = (direction) => {
+        // Forward-facing (0)
+        if (direction === 0) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "glasses",
+                "hair_behind",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                "wings", "bag"
+            ]
+        }
+        else if ([1, 4].includes(direction)) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "glasses",
+                "hair_behind",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                "wings", "bag"
+            ]
+        }
+        else if ([2, 5].includes(direction)) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "glasses",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top", "necklace",
+                "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
+                "wings", "bag"
+            ]
+        }
+        // Back view (3)
+        else {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "piercings", "earPiece", "glasses",
+                "horns",
+                "top", "necklace", "coat", "hair_infront",
+                "hair_behind", "hat", "neckwear",
+                "wings", "bag"
+            ]
+        }
+    }
+
+    // Draw layers in the correct order for this direction
+    const layerOrder = getFacingOrder(direction)
+    for (const layerName of layerOrder) {
+        let layer = null
+        if (layerName == 'shoes_before' && !shoesBehindPants)
+            layer = layers["shoes"]
+        else if (layerName == 'shoes_after' && shoesBehindPants)
+            layer = layers["shoes"]
+        else if (layerName == 'hair_behind' && !hairInfrontTop)
+            layer = layers["hair"]
+        else if (layerName == 'hair_infront' && hairInfrontTop)
+            layer = layers["hair"]
+        else
+            layer = layers[layerName]
+        if (!layer) continue
+
+        if (layerName === 'hair_behind' && !hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'hair_infront' && hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        // Special handling for shoes behind pants
+        else if (layerName === 'shoes_before' && !shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'shoes_after' && shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        // Normal layer drawing
+        else {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+    }
+
+    return canvas.toBuffer()
+}
+
+const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontTop) => {
+    // Final sprite sheet canvas
+    const canvas = createCanvas(2550, 850)
+    const ctx = canvas.getContext('2d')
+
+    // Combine all tattoos into a single layer for simplicity
+    const combineTattoos = async (tattooLayers) => {
+        const tattooCanvas = createCanvas(2550, 850)
+        const tattooCtx = tattooCanvas.getContext('2d')
+        
+        for (const [key, tattoo] of Object.entries(tattooLayers)) {
+            if (key.startsWith('tattoos') && tattoo) {
+                tattooCtx.drawImage(tattoo, 0, 0)
+            }
+        }
+        
+        return await loadImage(tattooCanvas.toBuffer())
+    }
+
+    // Create layers object with combined tattoos
+    const tattoos = await combineTattoos(allLayers)
+    const layers = {
+        ...allLayers,
+        tattoos,
+    }
+
+    // Remove individual tattoo layers to prevent double-drawing
+    Object.keys(layers).forEach(key => {
+        if (key.startsWith('tattoos') && key !== 'tattoos') {
+            delete layers[key]
+        }
+    })
+
+    // Generate each direction
+    for (let direction = 0; direction < 6; direction++) {
+        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
+        ctx.drawImage(
+            await loadImage(directionCanvas),
+            direction * 425, 0  // Place each direction in its correct position
+        )
+    }
+
+    return canvas.toBuffer()
+}
+
+async function cropImage(sourceImage, x, y, width, height) {
+    try {
+        const loadedImage = await loadImage(sourceImage)
+        const canvas = createCanvas(width, height)
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(loadedImage, x, y, width, height, 0, 0, width, height)
+        return canvas.toBuffer()
+    }
+    catch (error) {
+        console.error('Error processing images:', error)
+        throw error
     }
 }
 
@@ -511,14 +594,4 @@ const handleCacheClear = async (req, res) => {
     }
 }
 
-export default { 
-    getAvatar, 
-    clearAllCaches, 
-    handleCacheClear,
-    cleanup: async () => {
-        if (pool) {
-            await pool.close()
-            pool = null
-        }
-    }
- }
+export default { getAvatar, clearAllCaches, handleCacheClear }
