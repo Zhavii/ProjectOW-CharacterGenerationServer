@@ -3,6 +3,10 @@ name: Deploy to Azure VM
 on:
   push:
     branches: [ main ]
+  workflow_run:
+        workflows: ['Validate']
+        types: [completed]
+        branches: [ main ]
 
 jobs:
   deploy:
@@ -78,8 +82,10 @@ jobs:
 
             # Start the application with the working configuration
             cd ~/myapp &&
-            pm2 save"
-
-      - name: Run on VM
-        run: |
-          NODE_ENV=production pm2 start app/app.js --name app --time --watch
+            pm2 save &&
+            
+            # Verify the application is running
+            pm2 list &&
+            echo 'Deployment completed. Checking application status...' &&
+            sleep 5 &&
+            pm2 status"
