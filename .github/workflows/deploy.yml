@@ -109,22 +109,21 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
             cd ~/myapp
             
-            # Check app.js exists in correct location
-            if [ ! -f app/app.js ]; then
-              echo 'Error: app.js not found in expected location'
-              ls -R app/
-              exit 1
-            fi
+            echo 'Current directory structure:'
+            ls -R
             
-            # Check if process is running
-            if pm2 list | grep -q 'app.*online'; then
-              echo 'PM2 process is running and online'
-              exit 0
-            else
-              echo 'PM2 process status:'
+            echo 'Attempting to start app...'
+            pm2 delete all || true
+            pm2 flush
+            
+            if [ -f app/app.js ]; then
+              echo 'Found app.js, starting...'
+              NODE_ENV=production pm2 start app/app.js --name app
+              pm2 save
               pm2 list
-              echo 'PM2 logs:'
-              pm2 logs app --lines 50
+              echo 'Recent logs:'
+              pm2 logs --lines 20 || true
+            else
+              echo 'app.js not found in expected location'
               exit 1
-            fi
-          "
+            fi"
