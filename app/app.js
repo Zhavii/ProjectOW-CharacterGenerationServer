@@ -76,6 +76,7 @@ if (process.platform !== 'win32') {
 else {
     app.listen(process.env.PORT)
 }
+console.log(`Is Windows: ${process.platform === 'win32'}`)
 console.log(`Server started @ ${process.env.PORT}`)
 
 // API
