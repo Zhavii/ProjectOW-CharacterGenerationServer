@@ -305,7 +305,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "glasses",
+                "wings", "glasses",
                 "hair_behind",
                 "socks",
                 "shoes_before",
@@ -314,7 +314,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "bracelets", "handheld",
                 "top",
                 "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
-                "wings", "bag"
+                "bag"
             ]
         }
         else if ([1, 4].includes(direction)) {
@@ -343,7 +343,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
                 "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
                 "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "glasses",
+                "wings", "glasses",
                 "socks",
                 "shoes_before",
                 "gloves", "bottom", "belt",
@@ -351,7 +351,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
                 "bracelets", "handheld",
                 "top", "necklace",
                 "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
-                "wings", "bag"
+                "bag"
             ]
         }
         // Back view (3)
