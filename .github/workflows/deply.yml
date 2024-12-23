@@ -86,5 +86,3 @@ jobs:
             echo 'Deployment completed. Checking application status...' &&
             sleep 5 &&
             pm2 status"
-
-            NODE_ENV=production pm2 start app/app.js --name app --time --watch
