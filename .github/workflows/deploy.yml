@@ -30,8 +30,8 @@ jobs:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          # Create tar preserving paths
-          find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -print0 | tar -czf deploy.tar.gz --null -T -
+          # Create tar with specific flags to preserve exact content
+          find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -print0 | LC_ALL=C sort -z | tar --no-recursion --null -T - -czf deploy.tar.gz
           
           # Copy the tar file to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
@@ -49,7 +49,7 @@ jobs:
             mkdir -p ~/temp_deploy
             cd ~/temp_deploy
             
-            # Extract new files preserving paths
+            # Extract new files preserving paths and attributes
             tar -xzf ~/deploy.tar.gz
             rm ~/deploy.tar.gz
             
@@ -80,9 +80,11 @@ jobs:
             NODE_ENV=production pm2 start app/app.js --name app
             pm2 save
             
-            # Show status
+            # Show status and file contents for verification
             echo 'PM2 process list:'
             pm2 list
+            echo 'Verifying app.js contents:'
+            cat app/app.js
             "
 
   verify:
@@ -109,17 +111,17 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
             cd ~/myapp
             
-            echo 'Current directory structure:'
-            ls -R
-            
-            echo 'Attempting to start app...'
-            pm2 delete all || true
-            pm2 flush
-            
             if [ -f app/app.js ]; then
-              echo 'Found app.js, starting...'
+              echo 'Checking app.js contents...'
+              cat app/app.js
+              
+              echo 'Starting app...'
+              pm2 delete all || true
+              pm2 flush
               NODE_ENV=production pm2 start app/app.js --name app
               pm2 save
+              
+              echo 'PM2 status:'
               pm2 list
             else
               echo 'app.js not found in expected location'
