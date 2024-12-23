@@ -2,7 +2,7 @@ name: Deploy to Azure VM
 
 on:
   push:
-    branches: [ main ]  # or your default branch
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -78,4 +78,10 @@ jobs:
             # Start the application
             cd ~/myapp &&
             pm2 start app/app.js --name app -f &&
-            pm2 save"
+            pm2 save &&
+            
+            # Verify the application is running
+            pm2 list &&
+            echo 'Deployment completed. Checking application status...' &&
+            sleep 5 &&
+            pm2 status"
