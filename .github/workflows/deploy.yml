@@ -31,30 +31,36 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+            set -e  # Exit on any error
+
             # Kill any existing node processes
             sudo pkill node || true
 
             # Clean up PM2 and Node
+            sudo pm2 delete all || true
             sudo rm -rf ~/.pm2
             sudo rm -rf /usr/lib/node_modules/pm2
             sudo npm cache clean -f
 
+            # Clean up temporary directory if it exists
+            rm -rf ~/temp_deploy
+
             # Install Node.js fresh
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
-            sudo apt-get install -y nodejs &&
+            sudo apt-get install -y nodejs
 
             # Install and initialize PM2
-            sudo npm install -g pm2 &&
-            cd ~ &&
-            pm2 startup ubuntu &&
-            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser &&
+            sudo npm install -g pm2
+            cd ~
+            pm2 startup ubuntu
+            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser
 
-            # Create a temporary directory for the new deployment
-            mkdir -p ~/temp_deploy &&
-            cd ~/temp_deploy &&
+            # Create and move to temporary directory
+            mkdir -p ~/temp_deploy
+            cd ~/temp_deploy
 
             # Clone the repository
-            git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
+            git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' .
 
             # Create .env file with secrets
             cat > .env << 'EOL'
@@ -69,21 +75,28 @@ jobs:
             EOL
 
             # Install dependencies
-            npm ci --production &&
+            npm ci --production
 
-            # Move the new version into place
-            rm -rf ~/myapp &&
-            mv ~/temp_deploy ~/myapp &&
+            # Safely move the new version into place
+            if [ -d ~/myapp ]; then
+              rm -rf ~/myapp.old || true
+              mv ~/myapp ~/myapp.old
+            fi
+            mv ~/temp_deploy ~/myapp
 
-            # Start the application with the working configuration
-            cd ~/myapp &&
-            pm2 save &&
-            
+            # Cleanup old backup if exists
+            rm -rf ~/myapp.old || true
+
+            # Start the application
+            cd ~/myapp
+            pm2 save
+
             # Verify the application is running
-            pm2 list &&
-            echo 'Deployment completed. Checking application status...' &&
-            sleep 5 &&
+            pm2 list
+            echo 'Deployment completed. Checking application status...'
+            sleep 5
             pm2 status"
+
   run:
     needs: deploy
     if: ${{ needs.deploy.result == 'success' }}
@@ -104,6 +117,6 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-            cd ~/myapp &&
-            pm2 kill &&
+            cd ~/myapp
+            pm2 kill
             NODE_ENV=production pm2 start app/app.js --name app --time"
