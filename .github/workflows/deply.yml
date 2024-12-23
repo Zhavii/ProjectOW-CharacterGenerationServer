@@ -26,11 +26,13 @@ jobs:
           ssh-add ~/.ssh/deploy_key
           
       - name: Deploy to VM
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
             rm -rf ~/myapp &&
             mkdir -p ~/myapp &&
             cd ~/myapp &&
-            git clone https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git . &&
+            git clone https://${GH_TOKEN}@github.com/${{ github.repository }}.git . &&
             npm ci --production &&
             pm2 start app.js"

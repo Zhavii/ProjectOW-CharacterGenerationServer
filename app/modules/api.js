@@ -22,7 +22,7 @@ const s3 = new AWS.S3({
 
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
-    max: 30, // Adjust based on memory constraints
+    max: 300, // Adjust based on memory constraints
     ttl: 1000 * 60 * 60, // 1 hour TTL
     updateAgeOnGet: true
 })
