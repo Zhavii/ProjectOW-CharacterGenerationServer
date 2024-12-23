@@ -1,129 +1,62 @@
-name: Deploy
-
-on:
-  - push
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '20.x'
-          cache: 'npm'
-          
-      - name: Install Dependencies
-        run: npm ci --ignore-scripts
-        
-      - name: Setup SSH Key
-        run: |
-          install -m 600 -D /dev/null ~/.ssh/deploy_key
-          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/deploy_key
-          
-      - name: Deploy to VM
+- name: Deploy to VM
         env:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          # Create tar with specific flags to preserve exact content
-          find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -print0 | LC_ALL=C sort -z | tar --no-recursion --null -T - -czf deploy.tar.gz
+          # First, let's see what files we're actually including
+          find . -type f -not -path "./node_modules/*" -not -path "./.git/*" -ls
+          
+          # Create tar from root directory to preserve structure
+          tar -czf deploy.tar.gz --exclude='node_modules' --exclude='.git' .
           
           # Copy the tar file to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
           
           # Execute deployment commands
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-            set -e
+            set -ex  # Add -x for debugging
             
-            # Stop existing application
-            pm2 delete all || true
-            sudo pkill node || true
+            # Show current state
+            echo 'Current directory contents:'
+            ls -la
             
             # Clean up and prepare directories
             rm -rf ~/temp_deploy
             mkdir -p ~/temp_deploy
             cd ~/temp_deploy
             
-            # Extract new files preserving paths and attributes
+            # Extract and show files
             tar -xzf ~/deploy.tar.gz
-            rm ~/deploy.tar.gz
+            echo 'Extracted contents:'
+            ls -R
             
-            # Set up environment
-            cat > .env << 'EOL'
-            CENTRAL_SERVER='${{ secrets.CENTRAL_SERVER }}'
-            DO_ENDPOINT='${{ secrets.DO_ENDPOINT }}'
-            DO_SPACE_ENDPOINT='${{ secrets.DO_SPACE_ENDPOINT }}'
-            DO_SPACE_ID='${{ secrets.DO_SPACE_ID }}'
-            DO_SPACE_KEY='${{ secrets.DO_SPACE_KEY }}'
-            DO_SPACE_NAME='${{ secrets.DO_SPACE_NAME }}'
-            MONGO_URI='${{ secrets.MONGO_URI }}'
-            PORT='${{ secrets.PORT }}'
-            EOL
+            # Set up environment with escaped variables
+            cat > .env << EOF
+            CENTRAL_SERVER=${CENTRAL_SERVER}
+            DO_ENDPOINT=${DO_ENDPOINT}
+            DO_SPACE_ENDPOINT=${DO_SPACE_ENDPOINT}
+            DO_SPACE_ID=${DO_SPACE_ID}
+            DO_SPACE_KEY=${DO_SPACE_KEY}
+            DO_SPACE_NAME=${DO_SPACE_NAME}
+            MONGO_URI=${MONGO_URI}
+            PORT=${PORT}
+            EOF
+
+            # Show env file contents (excluding sensitive data)
+            echo 'Environment file created with these variables:'
+            grep -v 'KEY\|URI' .env || true
             
             # Install dependencies
             npm ci --production
             
-            # Backup and replace application directory
-            if [ -d ~/myapp ]; then
-              rm -rf ~/myapp_backup
-              mv ~/myapp ~/myapp_backup
-            fi
-            mv ~/temp_deploy ~/myapp
+            # Use rsync instead of mv for more reliable copying
+            rsync -av --delete ~/temp_deploy/ ~/myapp/
             
             # Start application with PM2
             cd ~/myapp
-            NODE_ENV=production pm2 start app/app.js --name app
-            pm2 save
-            
-            # Show status and file contents for verification
-            echo 'PM2 process list:'
-            pm2 list
-            echo 'Verifying app.js contents:'
+            echo 'Final app directory contents:'
+            ls -R
             cat app/app.js
-            "
-
-  verify:
-    needs: deploy
-    if: ${{ needs.deploy.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Setup SSH Key
-        run: |
-          install -m 600 -D /dev/null ~/.ssh/deploy_key
-          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/deploy_key
-
-      - name: Wait and Verify Deployment
-        env:
-          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
-          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
-        run: |
-          echo "Waiting for server to start..."
-          sleep 15
-          
-          echo "Verifying deployment via SSH..."
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-            cd ~/myapp
             
-            if [ -f app/app.js ]; then
-              echo 'Checking app.js contents...'
-              cat app/app.js
-              
-              echo 'Starting app...'
-              pm2 delete all || true
-              pm2 flush
-              NODE_ENV=production pm2 start app/app.js --name app
-              pm2 save
-              
-              echo 'PM2 status:'
-              pm2 list
-            else
-              echo 'app.js not found in expected location'
-              exit 1
-            fi"
+            NODE_ENV=production pm2 start app/app.js --name app
+            pm2 save"
