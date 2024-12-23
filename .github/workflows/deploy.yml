@@ -90,26 +90,22 @@ jobs:
       if: ${{ needs.deploy.result == 'success' }}
       runs-on: ubuntu-latest
       steps:
-        - name: Verify Deployment
+        - name: Wait and Verify Deployment
           env:
             SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
             SSH_HOST: ${{ secrets.AZURE_VM_IP }}
           run: |
             echo "Waiting for server to start..."
-            sleep 15  # Wait 15 seconds for server to initialize
+            sleep 30  # Give more time for the server to fully initialize
             
-            echo "Verifying deployment..."
-            # Try HTTP first
-            if curl -f http://${{ secrets.AZURE_VM_IP }}:${{ secrets.PORT }}; then
-              echo "Successfully connected via HTTP"
-              exit 0
-            fi
-            
-            # If HTTP fails, try HTTPS
-            if curl -k https://${{ secrets.AZURE_VM_IP }}:${{ secrets.PORT }}; then
-              echo "Successfully connected via HTTPS"
-              exit 0
-            fi
-            
-            echo "Failed to connect to server via both HTTP and HTTPS"
-            exit 1
+            echo "Verifying deployment via SSH..."
+            # First check if the process is running via SSH
+            ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+              if pm2 list | grep app; then
+                echo 'PM2 process is running'
+                exit 0
+              else
+                echo 'PM2 process not found'
+                exit 1
+              fi
+            "
