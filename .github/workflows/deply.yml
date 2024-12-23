@@ -14,9 +14,10 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: '20.x'
+          cache: 'npm'
           
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
         
       - name: Setup SSH Key
         run: |
@@ -26,11 +27,28 @@ jobs:
           ssh-add ~/.ssh/deploy_key
           
       - name: Deploy to VM
+        env:
+          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
+          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
-            # Install Node.js and npm if not already installed
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+            # Kill any existing node processes
+            sudo pkill node || true
+
+            # Clean up PM2 and Node
+            sudo rm -rf ~/.pm2
+            sudo rm -rf /usr/lib/node_modules/pm2
+            sudo npm cache clean -f
+
+            # Install Node.js fresh
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
             sudo apt-get install -y nodejs &&
+
+            # Install and initialize PM2
+            sudo npm install -g pm2 &&
+            cd ~ &&
+            pm2 startup ubuntu &&
+            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser &&
 
             # Create a temporary directory for the new deployment
             mkdir -p ~/temp_deploy &&
@@ -40,20 +58,18 @@ jobs:
             git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
 
             # Create .env file with secrets
-            echo 'CENTRAL_SERVER=${{ secrets.CENTRAL_SERVER }}' >> .env &&
-            echo 'DO_ENDPOINT=${{ secrets.DO_ENDPOINT }}' > .env &&
-            echo 'DO_SPACE_ENDPOINT=${{ secrets.DO_SPACE_ENDPOINT }}' >> .env &&
-            echo 'DO_SPACE_ID=${{ secrets.DO_SPACE_ID }}' >> .env &&
-            echo 'DO_SPACE_KEY=${{ secrets.DO_SPACE_KEY }}' >> .env &&
-            echo 'DO_SPACE_NAME=${{ secrets.DO_SPACE_NAME }}' >> .env &&
-            echo 'MONGO_URI=${{ secrets.MONGO_URI }}' >> .env &&
+            cat > .env << 'EOL'
+CENTRAL_SERVER=${{ secrets.CENTRAL_SERVER }}
+DO_ENDPOINT=${{ secrets.DO_ENDPOINT }}
+DO_SPACE_ENDPOINT=${{ secrets.DO_SPACE_ENDPOINT }}
+DO_SPACE_ID=${{ secrets.DO_SPACE_ID }}
+DO_SPACE_KEY=${{ secrets.DO_SPACE_KEY }}
+DO_SPACE_NAME=${{ secrets.DO_SPACE_NAME }}
+MONGO_URI=${{ secrets.MONGO_URI }}
+EOL
 
             # Install dependencies
             npm ci --production &&
-
-            # Stop PM2 process
-            sudo npm install -g pm2 &&
-            pm2 delete app || true &&
 
             # Move the new version into place
             rm -rf ~/myapp &&
