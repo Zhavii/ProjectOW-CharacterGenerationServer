@@ -30,14 +30,8 @@ jobs:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          # First, create a directory and copy files locally
-          mkdir -p deploy
-          cp -r * deploy/
-          
-          # Create tar excluding node_modules and .git
-          cd deploy
-          tar --exclude='node_modules' --exclude='.git' -czf ../deploy.tar.gz .
-          cd ..
+          # Create tar directly without creating a new directory
+          tar --exclude='node_modules' --exclude='.git' -czf deploy.tar.gz ./*
           
           # Copy the tar file to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
