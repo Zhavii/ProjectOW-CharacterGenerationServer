@@ -33,4 +33,4 @@ jobs:
             cd ~/myapp &&
             git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
             npm ci --production &&
-            pm2 start app.js"
+            pm2 start app/app.js"
