@@ -3,10 +3,6 @@ name: Deploy to Azure VM
 on:
   push:
     branches: [ main ]
-  workflow_run:
-        workflows: ['Validate']
-        types: [completed]
-        branches: [ main ]
 
 jobs:
   deploy:
@@ -89,3 +85,23 @@ jobs:
             echo 'Deployment completed. Checking application status...' &&
             sleep 5 &&
             pm2 status"
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        
+      - name: Setup SSH Key
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/deploy_key
+          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
+          eval "$(ssh-agent -s)"
+          ssh-add ~/.ssh/deploy_key
+          
+      - name: Deploy to VM
+        env:
+          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
+          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
+            NODE_ENV=production pm2 start app/app.js --name app --time --watch"
