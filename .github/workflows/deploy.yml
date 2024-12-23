@@ -64,15 +64,15 @@ jobs:
            
            # Set up environment
            cat > .env << 'ENVFILE'
-CENTRAL_SERVER='${{ secrets.CENTRAL_SERVER }}'
-DO_ENDPOINT='${{ secrets.DO_ENDPOINT }}'
-DO_SPACE_ENDPOINT='${{ secrets.DO_SPACE_ENDPOINT }}'
-DO_SPACE_ID='${{ secrets.DO_SPACE_ID }}'
-DO_SPACE_KEY='${{ secrets.DO_SPACE_KEY }}'
-DO_SPACE_NAME='${{ secrets.DO_SPACE_NAME }}'
-MONGO_URI='${{ secrets.MONGO_URI }}'
-PORT='${{ secrets.PORT }}'
-ENVFILE
+          CENTRAL_SERVER='${{ secrets.CENTRAL_SERVER }}'
+          DO_ENDPOINT='${{ secrets.DO_ENDPOINT }}'
+          DO_SPACE_ENDPOINT='${{ secrets.DO_SPACE_ENDPOINT }}'
+          DO_SPACE_ID='${{ secrets.DO_SPACE_ID }}'
+          DO_SPACE_KEY='${{ secrets.DO_SPACE_KEY }}'
+          DO_SPACE_NAME='${{ secrets.DO_SPACE_NAME }}'
+          MONGO_URI='${{ secrets.MONGO_URI }}'
+          PORT='${{ secrets.PORT }}'
+          ENVFILE
            
            # Clean old directory and move new one in place
            rm -rf ~/myapp
