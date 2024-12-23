@@ -46,6 +46,6 @@ jobs:
             # Stop any existing PM2 processes and start fresh
             sudo npm install -g pm2 &&
             pm2 delete app || true &&
-            cd ~/myapp &&  # Ensure we're in the right directory
-            pm2 start app/app.js --name app &&
+            cd ~/myapp &&
+            pm2 start app/app.js --name app -f &&  # Added -f flag here
             pm2 save"
