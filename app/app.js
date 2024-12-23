@@ -5,6 +5,8 @@ import bodyParser from 'body-parser'
 import mongoSanitize from 'express-mongo-sanitize'
 import multer from 'multer'
 import os from 'os'
+import fs from 'fs'
+import https from 'https'
 
 import User from './models/User.js'
 import Item from './models/Item.js'
@@ -64,7 +66,17 @@ app.use(mongoSanitize({ replaceWith: '_', allowDots: true }))
 
 await connectDB()
 
-app.listen(process.env.PORT)
+
+if (process.platform !== 'win32') {
+    const cts = {
+        cert: fs.readFileSync('/etc/letsencrypt/live/pow-cc.eastus.cloudapp.azure.com/fullchain.pem'),
+        key: fs.readFileSync(' /etc/letsencrypt/live/pow-cc.eastus.cloudapp.azure.com/privkey.pem')
+    }
+    https.createServer(cts, app).listen(process.env.PORT)
+}
+else {
+    app.listen(process.env.PORT)
+}
 console.log(`Server started @ ${process.env.PORT}`)
 
 // API
