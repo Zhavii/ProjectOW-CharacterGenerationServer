@@ -32,7 +32,7 @@ jobs:
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
           # Create a tar of the current directory
-          tar -czf deploy.tar.gz .
+          tar -czf deploy.tar.gz *
           
           # Copy the tar to the server
           scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no deploy.tar.gz $SSH_USERNAME@$SSH_HOST:~/deploy.tar.gz
