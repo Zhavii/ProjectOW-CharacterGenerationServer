@@ -28,24 +28,29 @@ jobs:
       - name: Deploy to VM
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
-            # Install Node.js and npm
+            # Install Node.js and npm if not already installed
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
             sudo apt-get install -y nodejs &&
             
-            # Create directory first and cd into it
-            mkdir -p ~/myapp &&
-            cd ~/myapp &&
+            # Create a temporary directory for the new deployment
+            mkdir -p ~/temp_deploy &&
+            cd ~/temp_deploy &&
             
-            # Remove contents but not the directory itself
-            rm -rf * &&
-            
-            # Deploy application
+            # Clone the repository
             git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
+            
+            # Install dependencies
             npm ci --production &&
             
-            # Stop any existing PM2 processes and start fresh
+            # Stop PM2 process
             sudo npm install -g pm2 &&
             pm2 delete app || true &&
+            
+            # Move the new version into place
+            rm -rf ~/myapp &&
+            mv ~/temp_deploy ~/myapp &&
+            
+            # Start the application
             cd ~/myapp &&
-            pm2 start app/app.js --name app -f &&  # Added -f flag here
+            pm2 start app/app.js --name app -f &&
             pm2 save"
