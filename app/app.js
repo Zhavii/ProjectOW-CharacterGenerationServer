@@ -42,7 +42,7 @@ Resource Usage:
 CPU: ${cpuUsage}%
 Memory: ${memoryUsage}% (${usedMemoryMB}MB / ${totalMemoryMB}MB)
 Timestamp: ${new Date().toISOString()}
-----------------------------------------`)
+---------------------------------------`)
 }
 
 // Start monitoring every 10 seconds
