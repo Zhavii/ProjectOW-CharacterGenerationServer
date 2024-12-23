@@ -86,14 +86,30 @@ jobs:
             pm2 list"
 
   verify:
-    needs: deploy
-    if: ${{ needs.deploy.result == 'success' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Verify Deployment
-        env:
-          SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
-          SSH_HOST: ${{ secrets.AZURE_VM_IP }}
-        run: |
-          echo "Verifying deployment..."
-          curl -k https://${{ secrets.AZURE_VM_IP }}
+      needs: deploy
+      if: ${{ needs.deploy.result == 'success' }}
+      runs-on: ubuntu-latest
+      steps:
+        - name: Verify Deployment
+          env:
+            SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
+            SSH_HOST: ${{ secrets.AZURE_VM_IP }}
+          run: |
+            echo "Waiting for server to start..."
+            sleep 15  # Wait 15 seconds for server to initialize
+            
+            echo "Verifying deployment..."
+            # Try HTTP first
+            if curl -f http://${{ secrets.AZURE_VM_IP }}:${{ secrets.PORT }}; then
+              echo "Successfully connected via HTTP"
+              exit 0
+            fi
+            
+            # If HTTP fails, try HTTPS
+            if curl -k https://${{ secrets.AZURE_VM_IP }}:${{ secrets.PORT }}; then
+              echo "Successfully connected via HTTPS"
+              exit 0
+            fi
+            
+            echo "Failed to connect to server via both HTTP and HTTPS"
+            exit 1
