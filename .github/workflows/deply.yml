@@ -21,8 +21,8 @@ jobs:
         
       - name: Setup SSH Key
         run: |
-          printf "%s" "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+          install -m 600 -D /dev/null ~/.ssh/deploy_key
+          echo "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/deploy_key
           
@@ -31,38 +31,33 @@ jobs:
           SSH_USERNAME: ${{ secrets.AZURE_VM_USERNAME }}
           SSH_HOST: ${{ secrets.AZURE_VM_IP }}
         run: |
-          set -e
-
-          echo "Connecting to the Azure VM..."
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no $SSH_USERNAME@$SSH_HOST "
-            set -e
-
-            echo 'Stopping any existing Node.js processes...'
+            # Kill any existing node processes
             sudo pkill node || true
 
-            echo 'Cleaning up PM2 and Node.js...'
+            # Clean up PM2 and Node
             sudo rm -rf ~/.pm2
             sudo rm -rf /usr/lib/node_modules/pm2
             sudo npm cache clean -f
 
-            echo 'Installing Node.js fresh...'
+            # Install Node.js fresh
             curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - &&
-            sudo apt-get install -y nodejs
+            sudo apt-get install -y nodejs &&
 
-            echo 'Installing and initializing PM2...'
-            sudo npm install -g pm2
-            cd ~
-            pm2 startup ubuntu
-            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser
+            # Install and initialize PM2
+            sudo npm install -g pm2 &&
+            cd ~ &&
+            pm2 startup ubuntu &&
+            sudo env PATH=$PATH:/usr/bin pm2 startup ubuntu -u azureuser --hp /home/azureuser &&
 
-            echo 'Creating a temporary deployment directory...'
-            mkdir -p ~/temp_deploy
-            cd ~/temp_deploy
+            # Create a temporary directory for the new deployment
+            mkdir -p ~/temp_deploy &&
+            cd ~/temp_deploy &&
 
-            echo 'Cloning the repository...'
-            git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' .
+            # Clone the repository
+            git clone 'https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git' . &&
 
-            echo 'Creating .env file with secrets...'
+            # Create .env file with secrets
             cat > .env << 'EOL'
             CENTRAL_SERVER="${{ secrets.CENTRAL_SERVER }}"
             DO_ENDPOINT="${{ secrets.DO_ENDPOINT }}"
@@ -74,23 +69,17 @@ jobs:
             PORT="${{ secrets.PORT }}"
             EOL
 
-            echo 'Installing application dependencies...'
-            npm ci --production
+            # Install dependencies
+            npm ci --production &&
 
-            echo 'Replacing the old deployment with the new version...'
-            rm -rf ~/myapp
-            mv ~/temp_deploy ~/myapp
+            # Move the new version into place
+            rm -rf ~/myapp &&
+            mv ~/temp_deploy ~/myapp &&
 
-            echo 'Starting the application with PM2...'
-            cd ~/myapp
-            NODE_ENV=production pm2 start app/app.js --name app --time
-            pm2 save
+            # Start the application with the working configuration
+            cd ~/myapp &&
+            pm2 save"
 
-            echo 'Cleaning up temporary deployment directory...'
-            rm -rf ~/temp_deploy
-
-            echo 'Verifying the application is running...'
-            pm2 list
-            sleep 5
-            pm2 status
-          "
+      - name: Run on VM
+        run: |
+          NODE_ENV=production pm2 start app/app.js --name app --time --watch
