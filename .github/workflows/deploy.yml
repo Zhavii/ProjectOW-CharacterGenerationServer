@@ -79,6 +79,7 @@ jobs:
 
             # Start the application
             cd ~/myapp &&
+            sleep 10 &&
             NODE_ENV=production pm2 start app/app.js --name app --time &&
             pm2 save &&
             
