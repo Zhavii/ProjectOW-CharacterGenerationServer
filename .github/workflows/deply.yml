@@ -27,15 +27,10 @@ jobs:
           
       - name: Deploy to VM
         run: |
-          ssh -v -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.AZURE_VM_USERNAME }}@${{ secrets.AZURE_VM_IP }} "
+            rm -rf ~/myapp &&
+            mkdir -p ~/myapp &&
             cd ~/myapp &&
-            git pull origin main &&
+            git clone https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git . &&
             npm ci --production &&
-            pm2 restart app ||
-            (
-              mkdir -p ~/myapp &&
-              cd ~/myapp &&
-              git clone ${{ github.server_url }}/${{ github.repository }} . &&
-              npm ci --production &&
-              pm2 start app.js
-            )"
+            pm2 start app.js"
