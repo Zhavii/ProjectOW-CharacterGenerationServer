@@ -180,11 +180,11 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "N", undefined, user.username)
 
             // Update user asynchronously
-            const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+            const newHash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
             await User.updateOne(
                 { username: user.username },
                 {
-                    customizationHash: hash,
+                    customizationHash: newHash,
                     clothing: user.clothing,
                     thumbnail: user.thumbnail,
                     avatar: user.avatar
