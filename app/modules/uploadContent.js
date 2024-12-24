@@ -42,7 +42,9 @@ const uploadImage = (previousMedia, file, location, maxSize, resizePixels, error
             }
 
             let data = file.data
-            if (resizePixels == "DONT") {
+            if (resizePixels == "N") {
+            }
+            else if (resizePixels == "DONT") {
                 data = await sharp(data).webp({ quality: 100 }).toBuffer()
             }
             else if (resizePixels != undefined && resizePixels != null && resizePixels != '') {

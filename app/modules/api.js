@@ -21,7 +21,7 @@ const s3 = new AWS.S3({
 
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
-    max: 100, // Adjust based on memory constraints
+    max: 1000, // Adjust based on memory constraints
     ttl: 1000 * 60 * 60, // 1 hour TTL
     updateAgeOnGet: true
 })
@@ -66,28 +66,19 @@ const getAvatar = async (req, res) => {
             }
         }
 
-        // Check if file exists without loading it first
-        const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)
-        
-        try {
-            if (user.customizationHash === hash && type !== 'sprite') {
-                const stats = await fs.stat(avatarPath)
-                if (stats.isFile()) {
-                    // Stream the file instead of loading into memory
-                    const buffer = await fs.readFile(avatarPath)
-                    avatarCache.set(username, buffer)
-                    return res.status(200).send(buffer)
-                }
+        if (user.customizationHash === hash && type !== 'sprite') {
+            const avatarPath = path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
+            const stats = await fs.stat(avatarPath)
+            if (stats.isFile()) {
+                // Stream the file instead of loading into memory
+                const buffer = await fs.readFile(avatarPath)
+                avatarCache.set(username, buffer)
+                return res.status(200).send(buffer)
             }
-        } catch (error) {
-            // File doesn't exist or other error, continue to generation
         }
 
         // Generate avatar if needed
         const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
-        
-        // Update cache and hash
-        avatarCache.set(hash, generatedAvatar)
         
         if (type !== 'sprite') {
             // Send response immediately
@@ -107,14 +98,8 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
             
-            try {
-                const baseDir = path.join(process.cwd(), '_bases', base)
-                base = await fs.readFile(baseDir)
-            }
-            catch (error) {
-                console.error('Error loading base:', error)
-                throw error
-            }
+            const baseDir = path.join(import.meta.dirname, '../../_bases', base)
+            base = await fs.readFile(baseDir)
 
             // Load all customization images
             const loadedImages = {
@@ -171,58 +156,45 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 hairInfrontTop = hair.description.includes('!s')
             }
 
-            // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
-            const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 100 }).toBuffer()
+            const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
 
-            try {
-                const avatarsDir = path.join(process.cwd(), 'avatars')
-                await fs.mkdir(avatarsDir, { recursive: true })
-                const filePath = path.join(avatarsDir, `${hash}.webp`)
-                await fs.writeFile(filePath, frontFacingBuffer)
-            }
-            catch (error) {
-                console.error('Error saving avatar:', error)
-            }
+            // Generate front-facing avatar for thumbnail
+            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
+            const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
+
+            const avatarsDir = path.join(import.meta.dirname, '../../avatars')
+            await fs.mkdir(avatarsDir, { recursive: true })
+            const filePath = path.join(avatarsDir, `${hash}.webp`)
+            await fs.writeFile(filePath, frontFacingBuffer)
 
             // Update cache and resolve with front-facing avatar
             avatarCache.set(hash, frontFacingBuffer)
             resolve(frontFacingBuffer)
 
-            // Generate full sprite sheet asynchronously
+            // Generate thumbnail from sprite sheet
+            const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
+
+            // Upload generated images
+            user.clothing = await uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+            user.thumbnail = await uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+            user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "N", undefined, user.username)
+
+            // Update user asynchronously
+            const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+            await User.updateOne(
+                { username: user.username },
+                {
+                    customizationHash: hash,
+                    clothing: user.clothing,
+                    thumbnail: user.thumbnail,
+                    avatar: user.avatar
+                },
+                { timestamps: false }
+            ).catch(console.error)
+
             if (type === 'sprite') {
-                try {
-                    const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
-                    
-                    // Generate thumbnail from sprite sheet
-                    const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
-
-                    // Upload generated images
-                    user.clothing = await uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-                    user.thumbnail = await uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-                    user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "DONT", undefined, user.username)
-
-                    // Update user asynchronously
-                    const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
-                    await User.updateOne(
-                        { username: user.username },
-                        {
-                            customizationHash: hash,
-                            clothing: user.clothing,
-                            thumbnail: user.thumbnail,
-                            avatar: user.avatar
-                        },
-                        { timestamps: false }
-                    ).catch(console.error)
-
-                    if (type === 'sprite') {
-                        const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
-                        return res.status(307).redirect(signedUrl)
-                    }
-                }
-                catch (error) {
-                    console.error('Error generating sprite sheet:', error)
-                }
+                const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+                return res.status(307).redirect(signedUrl)
             }
         }
         catch (error) {
@@ -233,10 +205,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 }
 
 const memoryCache = new LRUCache({
-    max: 500,
+    max: 1000,
 })
 
-const CACHE_DIR = path.join(process.cwd(), 'cache');
+const CACHE_DIR = path.join(import.meta.dirname, '../../cache');
 (async () => {
     await fs.mkdir(CACHE_DIR, { recursive: true })
 })()
@@ -475,7 +447,7 @@ async function cropImage(sourceImage, x, y, width, height) {
 
 // Batch process avatar deletion for old files
 const cleanupOldAvatars = async () => {
-    const avatarsDir = path.join(process.cwd(), 'avatars')
+    const avatarsDir = path.join(import.meta.dirname, '../../avatars')
     const files = await fs.readdir(avatarsDir)
     const now = Date.now()
     const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -522,7 +494,7 @@ const clearAllCaches = async () => {
 
         // Clear disk cache
         try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')
+            const CACHE_DIR = path.join(import.meta.dirname, '../../cache')
             const files = await fs.readdir(CACHE_DIR)
             
             await Promise.all(files.map(async (file) => {
@@ -550,7 +522,7 @@ const clearAllCaches = async () => {
 
         // Create fresh cache directory
         try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')
+            const CACHE_DIR = path.join(import.meta.dirname, '../../cache')
             await fs.mkdir(CACHE_DIR, { recursive: true })
         } catch (error) {
             results.errors.push({
