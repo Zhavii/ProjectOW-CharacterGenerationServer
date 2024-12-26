@@ -41,6 +41,9 @@ const userSchema = new mongoose.Schema({
     username: { type: String, required: false },
     email: { type: String, required: true },
     password: { type: String, required: false },
+    
+    isEmailVerified: { type: Boolean, default: false },
+    emailVerifiedAt: { type: Date },
 
     thumbnail: { type: String, default: '' },
     avatar: { type: String, default: '' },
