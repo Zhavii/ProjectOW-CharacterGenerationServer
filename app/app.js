@@ -61,9 +61,10 @@ app.use(mongoSanitize({ replaceWith: '_', allowDots: true }))
 
 await connectDB()
 
-app.listen(process.env.PORT)
+app.listen(process.env.PORT, () => {
+    console.log(`Server started @ ${process.env.PORT}`)
+})
 console.log(`Is Windows: ${process.platform === 'win32'}`)
-console.log(`Server started @ ${process.env.PORT}`)
 
 // API
 app.get('/', (req, res) => res.send('it works! :D'))
