@@ -19,6 +19,11 @@ const s3 = new AWS.S3({
   secretAccessKey: process.env.DO_SPACE_KEY
 });
 
+const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
+(async () => {
+    await fs.mkdir(AVATARS_DIR, { recursive: true })
+})()
+
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
     max: 20, // Adjust based on memory constraints
