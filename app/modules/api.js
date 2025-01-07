@@ -67,7 +67,7 @@ const getAvatar = async (req, res) => {
         }
 
         if (user.customizationHash === hash && type !== 'sprite') {
-            const avatarPath = path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
+            const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)//path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
             const stats = await fs.stat(avatarPath)
             if (stats.isFile()) {
                 // Stream the file instead of loading into memory
@@ -98,7 +98,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
             
-            const baseDir = path.join(import.meta.dirname, '../../_bases', base)
+            const baseDir = path.join(process.cwd(), '_bases', base)//path.join(import.meta.dirname, '../../_bases', base)
             base = await fs.readFile(baseDir)
 
             // Load all customization images
@@ -162,9 +162,9 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
 
-            const avatarsDir = path.join(import.meta.dirname, '../../avatars')
+            const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
             await fs.mkdir(avatarsDir, { recursive: true })
-            const filePath = path.join(avatarsDir, `${hash}.webp`)
+            const filePath = path.join(avatarsDir, `${hash}.webp`)//path.join(avatarsDir, `${hash}.webp`)
             await fs.writeFile(filePath, frontFacingBuffer)
 
             // Update cache and resolve with front-facing avatar
@@ -208,7 +208,7 @@ const memoryCache = new LRUCache({
     max: 100,
 })
 
-const CACHE_DIR = path.join(import.meta.dirname, '../../cache');
+const CACHE_DIR = path.join(process.cwd(), 'cache');//path.join(import.meta.dirname, '../../cache');
 (async () => {
     await fs.mkdir(CACHE_DIR, { recursive: true })
 })()
@@ -447,7 +447,7 @@ async function cropImage(sourceImage, x, y, width, height) {
 
 // Batch process avatar deletion for old files
 const cleanupOldAvatars = async () => {
-    const avatarsDir = path.join(import.meta.dirname, '../../avatars')
+    const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
     const files = await fs.readdir(avatarsDir)
     const now = Date.now()
     const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -494,7 +494,7 @@ const clearAllCaches = async () => {
 
         // Clear disk cache
         try {
-            const CACHE_DIR = path.join(import.meta.dirname, '../../cache')
+            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
             const files = await fs.readdir(CACHE_DIR)
             
             await Promise.all(files.map(async (file) => {
@@ -522,7 +522,7 @@ const clearAllCaches = async () => {
 
         // Create fresh cache directory
         try {
-            const CACHE_DIR = path.join(import.meta.dirname, '../../cache')
+            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
             await fs.mkdir(CACHE_DIR, { recursive: true })
         } catch (error) {
             results.errors.push({
