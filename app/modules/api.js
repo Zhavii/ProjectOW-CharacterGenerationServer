@@ -1,4 +1,5 @@
 import { xxHash32 } from 'js-xxhash'
+import { createCanvas, loadImage } from 'canvas'
 import uploadContent from './uploadContent.js'
 import axios from 'axios'
 import fs from 'fs/promises'
@@ -13,9 +14,9 @@ import Item from '../models/Item.js'
 
 const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
 const s3 = new AWS.S3({
-    endpoint: spacesEndpoint,
-    accessKeyId: process.env.DO_SPACE_ID,
-    secretAccessKey: process.env.DO_SPACE_KEY
+  endpoint: spacesEndpoint,
+  accessKeyId: process.env.DO_SPACE_ID,
+  secretAccessKey: process.env.DO_SPACE_KEY
 });
 
 const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
@@ -46,10 +47,10 @@ const getAvatar = async (req, res) => {
     try {
         const type = req.params.type
         const username = req.params.username
-
+        
         // Find user with minimal projection
         const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true })
-
+        
         if (!user) {
             return res.status(404).send('User not found.')
         }
@@ -83,7 +84,7 @@ const getAvatar = async (req, res) => {
 
         // Generate avatar if needed
         const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
-
+        
         if (type !== 'sprite') {
             // Send response immediately
             return res.status(200).send(generatedAvatar)
@@ -101,13 +102,13 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             // Determine base image based on user customization
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
-
+            
             const baseDir = path.join(process.cwd(), '_bases', base)//path.join(import.meta.dirname, '../../_bases', base)
-            const baseBuffer = await fs.readFile(baseDir)
+            base = await fs.readFile(baseDir)
 
-            // Load all customization images as buffers
+            // Load all customization images
             const loadedImages = {
-                base: baseBuffer,
+                base: await loadImage(base),
                 makeup: await getImage(user.customization.makeup),
                 hair: await getImage(user.customization.hair),
                 beard: await getImage(user.customization.beard),
@@ -163,7 +164,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
 
             // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850)
+            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
 
             const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
@@ -217,10 +218,6 @@ const CACHE_DIR = path.join(process.cwd(), 'cache');//path.join(import.meta.dirn
     await fs.mkdir(CACHE_DIR, { recursive: true })
 })()
 
-// Ensure avatars directory exists
-const avatarDir = path.join(process.cwd(), 'avatars')
-await fs.mkdir(avatarDir, { recursive: true }).catch(() => {})
-
 const getImage = async (item) => {
     if (item == undefined || item == null || item == '')
         return null
@@ -235,11 +232,12 @@ const getImage = async (item) => {
     try {
         const diskCacheKey = crypto.createHash('md5').update(cacheKey).digest('hex')
         const diskCachePath = path.join(CACHE_DIR, `${diskCacheKey}.png`)
-
+        
         // Check disk cache
         const diskCached = await fs.readFile(diskCachePath)
+            .then(async data => await loadImage(data))
             .catch(() => null)
-
+            
         if (diskCached) {
             memoryCache.set(cacheKey, diskCached);
             return diskCached
@@ -250,14 +248,15 @@ const getImage = async (item) => {
             `https://${process.env.DO_SPACE_ENDPOINT}item-sprite/${item}.webp`,
             { responseType: 'arraybuffer' }
         )
-
+        
         const pngBuffer = await sharp(data.data).png().toBuffer()
+        const image = await loadImage(pngBuffer)
 
         // Store in both caches
-        memoryCache.set(cacheKey, pngBuffer)
+        memoryCache.set(cacheKey, image)
         await fs.writeFile(diskCachePath, pngBuffer)
 
-        return pngBuffer
+        return image
     } 
     catch (error) {
         console.error(`Failed to load image for ${item}:`, error.message)
@@ -266,9 +265,13 @@ const getImage = async (item) => {
 }
 
 const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
+    // Canvas size for single direction (425x850)
+    const canvas = createCanvas(425, 850)
+    const ctx = canvas.getContext('2d')
+    
     // Calculate x offset based on direction (0-5)
     const sourceX = direction * 425
-
+    
     // Different layer orders based on direction
     const getFacingOrder = (direction) => {
         // Forward-facing (0)
@@ -350,20 +353,8 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
         }
     }
 
-    // Start with a transparent base image
-    let compositeImage = sharp({
-        create: {
-            width: 425,
-            height: 850,
-            channels: 4,
-            background: { r: 0, g: 0, b: 0, alpha: 0 }
-        }
-    })
-
-    // Build composite array for this direction
-    const compositeArray = []
+    // Draw layers in the correct order for this direction
     const layerOrder = getFacingOrder(direction)
-
     for (const layerName of layerOrder) {
         let layer = null
         if (layerName == 'shoes_before' && !shoesBehindPants)
@@ -376,64 +367,47 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
             layer = layers["hair"]
         else
             layer = layers[layerName]
-
         if (!layer) continue
 
-        // For each layer, we need to extract the correct section and composite it
-        const extractedLayer = await sharp(layer)
-            .extract({ left: sourceX, top: 0, width: 425, height: 850 })
-            .toBuffer()
-
-        compositeArray.push({
-            input: extractedLayer,
-            top: 0,
-            left: 0
-        })
+        if (layerName === 'hair_behind' && !hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'hair_infront' && hairInfrontTop) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        // Special handling for shoes behind pants
+        else if (layerName === 'shoes_before' && !shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        else if (layerName === 'shoes_after' && shoesBehindPants) {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
+        // Normal layer drawing
+        else {
+            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+        }
     }
 
-    // Apply all composites at once
-    compositeImage = await compositeImage.composite(compositeArray).toBuffer()
-
-    return compositeImage
+    return canvas.toBuffer()
 }
 
 const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontTop) => {
-    // Create a blank canvas for the full sprite sheet
-    let spriteSheet = sharp({
-        create: {
-            width: 2550,
-            height: 850,
-            channels: 4,
-            background: { r: 0, g: 0, b: 0, alpha: 0 }
-        }
-    })
+    // Final sprite sheet canvas
+    const canvas = createCanvas(2550, 850)
+    const ctx = canvas.getContext('2d')
 
-    // Combine all tattoos into a single layer
+    // Combine all tattoos into a single layer for simplicity
     const combineTattoos = async (tattooLayers) => {
-        let tattooComposite = sharp({
-            create: {
-                width: 2550,
-                height: 850,
-                channels: 4,
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
-            }
-        })
-
-        const tattooCompositeArray = []
+        const tattooCanvas = createCanvas(2550, 850)
+        const tattooCtx = tattooCanvas.getContext('2d')
+        
         for (const [key, tattoo] of Object.entries(tattooLayers)) {
-            if (key.startsWith('tattoo_') && tattoo) {
-                tattooCompositeArray.push({
-                    input: tattoo,
-                    top: 0,
-                    left: 0
-                })
+            if (key.startsWith('tattoos') && tattoo) {
+                tattooCtx.drawImage(tattoo, 0, 0)
             }
         }
-
-        if (tattooCompositeArray.length > 0) {
-            return await tattooComposite.composite(tattooCompositeArray).toBuffer()
-        }
-        return null
+        
+        return await loadImage(tattooCanvas.toBuffer())
     }
 
     // Create layers object with combined tattoos
@@ -445,32 +419,30 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
 
     // Remove individual tattoo layers to prevent double-drawing
     Object.keys(layers).forEach(key => {
-        if (key.startsWith('tattoo_') && key !== 'tattoos') {
+        if (key.startsWith('tattoos') && key !== 'tattoos') {
             delete layers[key]
         }
     })
 
-    // Generate each direction and composite onto the sprite sheet
-    const compositeArray = []
+    // Generate each direction
     for (let direction = 0; direction < 6; direction++) {
-        const directionBuffer = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
-        compositeArray.push({
-            input: directionBuffer,
-            left: direction * 425,
-            top: 0
-        })
+        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
+        ctx.drawImage(
+            await loadImage(directionCanvas),
+            direction * 425, 0  // Place each direction in its correct position
+        )
     }
 
-    spriteSheet = await spriteSheet.composite(compositeArray).toBuffer()
-
-    return spriteSheet
+    return canvas.toBuffer()
 }
 
 async function cropImage(sourceImage, x, y, width, height) {
     try {
-        return await sharp(sourceImage)
-            .extract({ left: x, top: y, width: width, height: height })
-            .toBuffer()
+        const loadedImage = await loadImage(sourceImage)
+        const canvas = createCanvas(width, height)
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(loadedImage, x, y, width, height, 0, 0, width, height)
+        return canvas.toBuffer()
     }
     catch (error) {
         console.error('Error processing images:', error)
@@ -484,7 +456,7 @@ const cleanupOldAvatars = async () => {
     const files = await fs.readdir(avatarsDir)
     const now = Date.now()
     const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
-
+    
     for (const file of files) {
         try {
             const filePath = path.join(avatarsDir, file)
@@ -529,7 +501,7 @@ const clearAllCaches = async () => {
         try {
             const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
             const files = await fs.readdir(CACHE_DIR)
-
+            
             await Promise.all(files.map(async (file) => {
                 const filePath = path.join(CACHE_DIR, file)
                 try {
@@ -576,7 +548,7 @@ const clearAllCaches = async () => {
 const handleCacheClear = async (req, res) => {
     try {
         const results = await clearAllCaches()
-
+        
         if (results.errors.length === 0) {
             res.status(200).json({
                 success: true,
