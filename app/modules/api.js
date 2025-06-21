@@ -43,6 +43,14 @@ const getParams = (username) => {
     }
 }
 
+const getParamsAvatar = (username) => {
+    return {
+        Bucket: process.env.DO_SPACE_NAME,
+        Key: `user-avatar/${username}.webp`,
+        Expires: 3600 // URL expires in 1 hour
+    }
+}
+
 const getAvatar = async (req, res) => {
     try {
         const type = req.params.type
@@ -71,15 +79,9 @@ const getAvatar = async (req, res) => {
             }
         }
 
-        if (user.customizationHash === hash && type !== 'sprite') {
-            const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)//path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
-            const stats = await fs.stat(avatarPath)
-            if (stats.isFile()) {
-                // Stream the file instead of loading into memory
-                const buffer = await fs.readFile(avatarPath)
-                avatarCache.set(username, buffer)
-                return res.status(200).send(buffer)
-            }
+        if (type !== 'sprite' && user.customizationHash === hash) {
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(username))
+            return res.status(307).redirect(signedUrl)
         }
 
         // Generate avatar if needed
@@ -167,11 +169,6 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
 
-            const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
-            await fs.mkdir(avatarsDir, { recursive: true })
-            const filePath = path.join(avatarsDir, `${hash}.webp`)//path.join(avatarsDir, `${hash}.webp`)
-            await fs.writeFile(filePath, frontFacingBuffer)
-
             // Update cache and resolve with front-facing avatar
             avatarCache.set(hash, frontFacingBuffer)
             resolve(frontFacingBuffer)
@@ -199,6 +196,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 
             if (type === 'sprite') {
                 const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+                return res.status(307).redirect(signedUrl)
+            }
+            else {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(user.username))
                 return res.status(307).redirect(signedUrl)
             }
         }
