@@ -8,432 +8,725 @@ import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import AWS from 'aws-sdk'
+import pLimit from 'p-limit'
+import { EventEmitter } from 'events'
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
 
+// Constants
+const MAX_CONCURRENT_GENERATIONS = 5
+const GENERATION_TIMEOUT = 30000 // 30 seconds
+const RETRY_ATTEMPTS = 3
+const RETRY_DELAY = 1000
+const MAX_IMAGE_LOAD_CONCURRENT = 10
+
+// Initialize AWS S3
 const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
 const s3 = new AWS.S3({
-  endpoint: spacesEndpoint,
-  accessKeyId: process.env.DO_SPACE_ID,
-  secretAccessKey: process.env.DO_SPACE_KEY
-});
-
-const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
-(async () => {
-    await fs.mkdir(AVATARS_DIR, { recursive: true })
-})()
-
-// In-memory cache for both avatar buffers and processed results
-const avatarCache = new LRUCache({
-    max: 20, // Adjust based on memory constraints
-    ttl: 1000 * 60 * 60, // 1 hour TTL
-    updateAgeOnGet: true
+    endpoint: spacesEndpoint,
+    accessKeyId: process.env.DO_SPACE_ID,
+    secretAccessKey: process.env.DO_SPACE_KEY,
+    httpOptions: {
+        timeout: 10000,
+        agent: new (require('https').Agent)({ keepAlive: true })
+    }
 })
 
-// Pre-initialize sharp for better performance
-sharp.cache(true)
-sharp.concurrency(2) // Adjust based on server CPU cores
+// Directory setup with error handling
+const AVATARS_DIR = path.join(process.cwd(), 'avatars')
+const CACHE_DIR = path.join(process.cwd(), 'cache')
+
+const initializeDirectories = async () => {
+    try {
+        await Promise.all([
+            fs.mkdir(AVATARS_DIR, { recursive: true }),
+            fs.mkdir(CACHE_DIR, { recursive: true })
+        ])
+    } catch (error) {
+        console.error('Failed to initialize directories:', error)
+        throw error
+    }
+}
+
+// Initialize directories on startup
+initializeDirectories().catch(console.error)
+
+// Enhanced caches with error tracking
+const avatarCache = new LRUCache({
+    max: 20,
+    ttl: 1000 * 60 * 60, // 1 hour
+    updateAgeOnGet: true,
+    dispose: (value, key) => {
+        console.log(`Disposing avatar cache entry: ${key}`)
+    }
+})
+
+const memoryCache = new LRUCache({
+    max: 100,
+    ttl: 1000 * 60 * 30, // 30 minutes
+    sizeCalculation: (value) => {
+        // Estimate image size in memory
+        return value.width * value.height * 4 // 4 bytes per pixel
+    },
+    maxSize: 1024 * 1024 * 100 // 100MB max
+})
+
+// Generation lock to prevent duplicate work
+const generationLocks = new Map()
+const generationEvents = new EventEmitter()
+
+// Circuit breaker for external services
+class CircuitBreaker {
+    constructor(threshold = 5, timeout = 60000) {
+        this.failures = 0
+        this.threshold = threshold
+        this.timeout = timeout
+        this.state = 'CLOSED'
+        this.nextAttempt = Date.now()
+    }
+
+    async execute(fn) {
+        if (this.state === 'OPEN') {
+            if (Date.now() < this.nextAttempt) {
+                throw new Error('Circuit breaker is OPEN')
+            }
+            this.state = 'HALF_OPEN'
+        }
+
+        try {
+            const result = await fn()
+            this.onSuccess()
+            return result
+        } catch (error) {
+            this.onFailure()
+            throw error
+        }
+    }
+
+    onSuccess() {
+        this.failures = 0
+        this.state = 'CLOSED'
+    }
+
+    onFailure() {
+        this.failures++
+        if (this.failures >= this.threshold) {
+            this.state = 'OPEN'
+            this.nextAttempt = Date.now() + this.timeout
+        }
+    }
+}
+
+const s3CircuitBreaker = new CircuitBreaker()
+const imageLoadCircuitBreaker = new CircuitBreaker()
+
+// Enhanced sharp configuration
+sharp.cache({ memory: 256, files: 20 })
+sharp.concurrency(2)
+sharp.simd(true)
+
+// Utility functions
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+const retryWithBackoff = async (fn, attempts = RETRY_ATTEMPTS, delay = RETRY_DELAY) => {
+    for (let i = 0; i < attempts; i++) {
+        try {
+            return await fn()
+        } catch (error) {
+            if (i === attempts - 1) throw error
+            const backoffDelay = delay * Math.pow(2, i)
+            console.warn(`Retry attempt ${i + 1}/${attempts} after ${backoffDelay}ms`, error.message)
+            await sleep(backoffDelay)
+        }
+    }
+}
+
+const sanitizeUsername = (username) => {
+    if (!username || typeof username !== 'string') {
+        throw new Error('Invalid username')
+    }
+    return username.replace(/[^a-zA-Z0-9_-]/g, '')
+}
 
 const getParams = (username) => {
     return {
         Bucket: process.env.DO_SPACE_NAME,
         Key: `user-clothing/${username}.webp`,
-        Expires: 3600 // URL expires in 1 hour
+        Expires: 3600
     }
 }
 
+// Main avatar endpoint with enhanced error handling
 const getAvatar = async (req, res) => {
+    const startTime = Date.now()
+    let lockKey = null
+    
     try {
+        // Validate inputs
         const type = req.params.type
-        const username = req.params.username
+        const username = sanitizeUsername(req.params.username)
         
-        // Find user with minimal projection
-        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true })
+        if (!['sprite', 'avatar', 'thumbnail'].includes(type)) {
+            return res.status(400).json({ error: 'Invalid avatar type' })
+        }
+
+        // Find user with error handling
+        const user = await User.findOne(
+            { username },
+            'username customization customizationHash clothing thumbnail avatar',
+            { lean: true, timeout: 5000 }
+        ).catch(error => {
+            console.error('Database error:', error)
+            throw new Error('Database unavailable')
+        })
         
         if (!user) {
-            return res.status(404).send('User not found.')
+            return res.status(404).json({ error: 'User not found' })
         }
 
-        // Calculate hash only once
-        const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+        // Calculate hash
+        const hash = xxHash32(JSON.stringify({
+            username: user.username,
+            customization: user.customization
+        }), 0).toString()
 
+        // Check if sprite is already generated
         if (type === 'sprite' && user.customizationHash === hash) {
-            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(username))
-            return res.status(307).redirect(signedUrl)
+            try {
+                const signedUrl = await s3CircuitBreaker.execute(() =>
+                    s3.getSignedUrlPromise('getObject', getParams(username))
+                )
+                return res.status(307).redirect(signedUrl)
+            } catch (error) {
+                console.error('S3 error:', error)
+                return res.status(503).json({ error: 'Storage service unavailable' })
+            }
         }
 
+        // Check memory cache for non-sprite types
         if (type !== 'sprite') {
-            // First check memory cache using username as key
             const cachedAvatar = avatarCache.get(hash)
             if (cachedAvatar) {
+                res.set('X-Cache', 'HIT')
                 return res.status(200).send(cachedAvatar)
             }
         }
 
+        // Check disk cache
         if (user.customizationHash === hash && type !== 'sprite') {
-            const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)//path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
-            const stats = await fs.stat(avatarPath)
-            if (stats.isFile()) {
-                // Stream the file instead of loading into memory
+            try {
+                const avatarPath = path.join(AVATARS_DIR, `${hash}.webp`)
                 const buffer = await fs.readFile(avatarPath)
-                avatarCache.set(username, buffer)
+                avatarCache.set(hash, buffer)
+                res.set('X-Cache', 'DISK')
                 return res.status(200).send(buffer)
+            } catch (error) {
+                // File doesn't exist or is corrupted, continue to generation
             }
         }
 
-        // Generate avatar if needed
-        const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
-        
+        // Check if generation is already in progress
+        lockKey = `${username}-${hash}`
+        if (generationLocks.has(lockKey)) {
+            // Wait for existing generation
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Generation timeout'))
+                }, GENERATION_TIMEOUT)
+
+                generationEvents.once(lockKey, (error, result) => {
+                    clearTimeout(timeout)
+                    if (error) {
+                        reject(error)
+                    } else if (type === 'sprite') {
+                        s3.getSignedUrlPromise('getObject', getParams(username))
+                            .then(url => res.status(307).redirect(url))
+                            .catch(reject)
+                    } else {
+                        res.status(200).send(result)
+                        resolve()
+                    }
+                })
+            })
+        }
+
+        // Acquire generation lock
+        generationLocks.set(lockKey, true)
+
+        // Generate avatar with timeout
+        const generatedAvatar = await Promise.race([
+            createAvatarThumbnail(user, hash, type, res),
+            new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Generation timeout')), GENERATION_TIMEOUT)
+            )
+        ])
+
+        // Emit success event
+        generationEvents.emit(lockKey, null, generatedAvatar)
+
         if (type !== 'sprite') {
-            // Send response immediately
+            res.set('X-Cache', 'MISS')
+            res.set('X-Generation-Time', `${Date.now() - startTime}ms`)
             return res.status(200).send(generatedAvatar)
         }
-    } 
-    catch (error) {
+    } catch (error) {
         console.error('Avatar generation error:', error)
-        res.status(500).send('Error generating avatar')
+        
+        // Emit error event if lock was acquired
+        if (lockKey && generationLocks.has(lockKey)) {
+            generationEvents.emit(lockKey, error)
+        }
+
+        // Send appropriate error response
+        if (error.message === 'Generation timeout') {
+            res.status(504).json({ error: 'Request timeout' })
+        } else if (error.message === 'Database unavailable') {
+            res.status(503).json({ error: 'Service temporarily unavailable' })
+        } else {
+            res.status(500).json({ error: 'Error generating avatar' })
+        }
+    } finally {
+        // Clean up lock
+        if (lockKey) {
+            generationLocks.delete(lockKey)
+        }
     }
 }
 
-const createAvatarThumbnail = async (user, hash, type, res) => {
-    return new Promise(async (resolve, reject) => {
+// Enhanced image loading with concurrency control
+const imageLoadLimit = pLimit(MAX_IMAGE_LOAD_CONCURRENT)
+
+const getImage = async (item) => {
+    if (!item) return null
+
+    const itemId = item.toString()
+    const cacheKey = itemId.toLowerCase()
+
+    // Check memory cache
+    const memCached = memoryCache.get(cacheKey)
+    if (memCached) return memCached
+
+    return imageLoadLimit(async () => {
         try {
-            // Determine base image based on user customization
-            let skinTone = user.customization.skinTone ?? 0
-            let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
+            // Check disk cache
+            const diskCacheKey = crypto.createHash('md5').update(cacheKey).digest('hex')
+            const diskCachePath = path.join(CACHE_DIR, `${diskCacheKey}.png`)
             
-            const baseDir = path.join(process.cwd(), '_bases', base)//path.join(import.meta.dirname, '../../_bases', base)
-            base = await fs.readFile(baseDir)
-
-            // Load all customization images
-            const loadedImages = {
-                base: await loadImage(base),
-                makeup: await getImage(user.customization.makeup),
-                hair: await getImage(user.customization.hair),
-                beard: await getImage(user.customization.beard),
-                eyes: await getImage(user.customization.eyes),
-                eyebrows: await getImage(user.customization.eyebrows),
-                head: await getImage(user.customization.head),
-                nose: await getImage(user.customization.nose),
-                mouth: await getImage(user.customization.mouth),
-                hat: await getImage(user.customization.hat),
-                piercings: await getImage(user.customization.piercings),
-                earPiece: await getImage(user.customization.earPiece),
-                glasses: await getImage(user.customization.glasses),
-                horns: await getImage(user.customization.horns),
-                top: await getImage(user.customization.top),
-                necklace: await getImage(user.customization.necklace),
-                neckwear: await getImage(user.customization.neckwear),
-                coat: await getImage(user.customization.coat),
-                belt: await getImage(user.customization.belt),
-                bottom: await getImage(user.customization.bottom),
-                socks: await getImage(user.customization.socks),
-                shoes: await getImage(user.customization.shoes),
-                bracelets: await getImage(user.customization.bracelets),
-                wings: await getImage(user.customization.wings),
-                bag: await getImage(user.customization.bag),
-                gloves: await getImage(user.customization.gloves),
-                handheld: await getImage(user.customization.handheld),
-                // Load tattoos
-                tattoo_head: await getImage(user.customization.tattoos?.head),
-                tattoo_neck: await getImage(user.customization.tattoos?.neck),
-                tattoo_chest: await getImage(user.customization.tattoos?.chest),
-                tattoo_stomach: await getImage(user.customization.tattoos?.stomach),
-                tattoo_backUpper: await getImage(user.customization.tattoos?.backUpper),
-                tattoo_backLower: await getImage(user.customization.tattoos?.backLower),
-                tattoo_armRight: await getImage(user.customization.tattoos?.armRight),
-                tattoo_armLeft: await getImage(user.customization.tattoos?.armLeft),
-                tattoo_legRight: await getImage(user.customization.tattoos?.legRight),
-                tattoo_legLeft: await getImage(user.customization.tattoos?.legLeft)
+            try {
+                const diskData = await fs.readFile(diskCachePath)
+                const image = await loadImage(diskData)
+                memoryCache.set(cacheKey, image)
+                return image
+            } catch (error) {
+                // Disk cache miss, continue to fetch
             }
 
-            // Check if shoes should be behind pants
-            let shoesBehindPants = false
-            if (user.customization.bottom) {
-                const pants = await Item.findById(user.customization.bottom, 'description').lean()
-                shoesBehindPants = pants.description.includes('!x')
+            // Fetch from remote with circuit breaker
+            const data = await imageLoadCircuitBreaker.execute(() =>
+                retryWithBackoff(async () => {
+                    const response = await axios.get(
+                        `https://${process.env.DO_SPACE_ENDPOINT}item-sprite/${itemId}.webp`,
+                        {
+                            responseType: 'arraybuffer',
+                            timeout: 10000,
+                            maxContentLength: 10 * 1024 * 1024 // 10MB max
+                        }
+                    )
+                    return response.data
+                })
+            )
+
+            // Process and cache
+            const pngBuffer = await sharp(data)
+                .png()
+                .toBuffer({ resolveWithObject: false })
+
+            const image = await loadImage(pngBuffer)
+
+            // Store in caches
+            memoryCache.set(cacheKey, image)
+            
+            // Write to disk cache asynchronously
+            fs.writeFile(diskCachePath, pngBuffer).catch(error => {
+                console.warn('Failed to write disk cache:', error.message)
+            })
+
+            return image
+        } catch (error) {
+            console.error(`Failed to load image for ${itemId}:`, error.message)
+            return null
+        }
+    })
+}
+
+// Enhanced avatar generation with better error handling
+const createAvatarThumbnail = async (user, hash, type, res) => {
+    const resources = []
+    
+    try {
+        // Validate customization data
+        if (!user.customization || typeof user.customization !== 'object') {
+            throw new Error('Invalid user customization data')
+        }
+
+        // Load base image
+        const skinTone = user.customization.skinTone ?? 0
+        const baseFileName = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
+        const baseDir = path.join(process.cwd(), '_bases', baseFileName)
+        
+        const baseBuffer = await fs.readFile(baseDir).catch(error => {
+            throw new Error(`Base image not found: ${baseFileName}`)
+        })
+
+        // Load all images with proper error handling
+        const imagePromises = {
+            base: loadImage(baseBuffer),
+            makeup: getImage(user.customization.makeup),
+            hair: getImage(user.customization.hair),
+            beard: getImage(user.customization.beard),
+            eyes: getImage(user.customization.eyes),
+            eyebrows: getImage(user.customization.eyebrows),
+            head: getImage(user.customization.head),
+            nose: getImage(user.customization.nose),
+            mouth: getImage(user.customization.mouth),
+            hat: getImage(user.customization.hat),
+            piercings: getImage(user.customization.piercings),
+            earPiece: getImage(user.customization.earPiece),
+            glasses: getImage(user.customization.glasses),
+            horns: getImage(user.customization.horns),
+            top: getImage(user.customization.top),
+            necklace: getImage(user.customization.necklace),
+            neckwear: getImage(user.customization.neckwear),
+            coat: getImage(user.customization.coat),
+            belt: getImage(user.customization.belt),
+            bottom: getImage(user.customization.bottom),
+            socks: getImage(user.customization.socks),
+            shoes: getImage(user.customization.shoes),
+            bracelets: getImage(user.customization.bracelets),
+            wings: getImage(user.customization.wings),
+            bag: getImage(user.customization.bag),
+            gloves: getImage(user.customization.gloves),
+            handheld: getImage(user.customization.handheld),
+            // Tattoos
+            tattoo_head: getImage(user.customization.tattoos?.head),
+            tattoo_neck: getImage(user.customization.tattoos?.neck),
+            tattoo_chest: getImage(user.customization.tattoos?.chest),
+            tattoo_stomach: getImage(user.customization.tattoos?.stomach),
+            tattoo_backUpper: getImage(user.customization.tattoos?.backUpper),
+            tattoo_backLower: getImage(user.customization.tattoos?.backLower),
+            tattoo_armRight: getImage(user.customization.tattoos?.armRight),
+            tattoo_armLeft: getImage(user.customization.tattoos?.armLeft),
+            tattoo_legRight: getImage(user.customization.tattoos?.legRight),
+            tattoo_legLeft: getImage(user.customization.tattoos?.legLeft)
+        }
+
+        const loadedImages = await Promise.all(
+            Object.entries(imagePromises).map(async ([key, promise]) => {
+                try {
+                    return [key, await promise]
+                } catch (error) {
+                    console.warn(`Failed to load ${key}:`, error.message)
+                    return [key, null]
+                }
+            })
+        ).then(entries => Object.fromEntries(entries))
+
+        // Get item metadata with error handling
+        let shoesBehindPants = false
+        let hairInfrontTop = false
+
+        if (user.customization.bottom) {
+            try {
+                const pants = await Item.findById(
+                    user.customization.bottom,
+                    'description',
+                    { lean: true, timeout: 2000 }
+                )
+                shoesBehindPants = pants?.description?.includes('!x') || false
+            } catch (error) {
+                console.warn('Failed to load pants metadata:', error.message)
             }
+        }
 
-            let hairInfrontTop = false
-            if (user.customization.hair) {
-                const hair = await Item.findById(user.customization.hair, 'description').lean()
-                hairInfrontTop = hair.description.includes('!s')
+        if (user.customization.hair) {
+            try {
+                const hair = await Item.findById(
+                    user.customization.hair,
+                    'description',
+                    { lean: true, timeout: 2000 }
+                )
+                hairInfrontTop = hair?.description?.includes('!s') || false
+            } catch (error) {
+                console.warn('Failed to load hair metadata:', error.message)
             }
+        }
 
-            const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
+        // Generate sprite sheet
+        const spriteSheet = await generateFullSpriteSheet(
+            loadedImages,
+            shoesBehindPants,
+            hairInfrontTop
+        )
+        resources.push(spriteSheet)
 
-            // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
-            const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
+        // Generate front-facing avatar
+        const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850)
+        const frontFacingBuffer = await sharp(frontFacingAvatar)
+            .webp({ quality: 95, effort: 4 })
+            .toBuffer()
 
-            const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
-            await fs.mkdir(avatarsDir, { recursive: true })
-            const filePath = path.join(avatarsDir, `${hash}.webp`)//path.join(avatarsDir, `${hash}.webp`)
-            await fs.writeFile(filePath, frontFacingBuffer)
+        // Save to disk
+        const filePath = path.join(AVATARS_DIR, `${hash}.webp`)
+        await fs.writeFile(filePath, frontFacingBuffer).catch(error => {
+            console.warn('Failed to save avatar to disk:', error.message)
+        })
 
-            // Update cache and resolve with front-facing avatar
-            avatarCache.set(hash, frontFacingBuffer)
-            resolve(frontFacingBuffer)
+        // Update cache
+        avatarCache.set(hash, frontFacingBuffer)
 
-            // Generate thumbnail from sprite sheet
-            const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
+        // Generate thumbnail
+        const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
 
-            // Upload generated images
-            user.clothing = await uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
-            user.thumbnail = await uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
-            user.avatar = await uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "N", undefined, user.username)
+        // Upload generated images with retry
+        try {
+            const [clothingUrl, thumbnailUrl, avatarUrl] = await Promise.all([
+                retryWithBackoff(() =>
+                    uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
+                ),
+                retryWithBackoff(() =>
+                    uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+                ),
+                retryWithBackoff(() =>
+                    uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "N", undefined, user.username)
+                )
+            ])
 
-            // Update user asynchronously
-            const newHash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+            // Update user record
+            const newHash = xxHash32(JSON.stringify({
+                username: user.username,
+                customization: user.customization
+            }), 0).toString()
+
             await User.updateOne(
                 { username: user.username },
                 {
                     customizationHash: newHash,
-                    clothing: user.clothing,
-                    thumbnail: user.thumbnail,
-                    avatar: user.avatar
+                    clothing: clothingUrl,
+                    thumbnail: thumbnailUrl,
+                    avatar: avatarUrl
                 },
                 { timestamps: false }
-            ).catch(console.error)
+            ).catch(error => {
+                console.error('Failed to update user record:', error)
+                // Continue even if update fails
+            })
 
             if (type === 'sprite') {
                 const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
                 return res.status(307).redirect(signedUrl)
             }
+
+            return frontFacingBuffer
+        } catch (uploadError) {
+            console.error('Upload failed:', uploadError)
+            // Return generated avatar even if upload fails
+            return frontFacingBuffer
         }
-        catch (error) {
-            console.error('Error generating avatar:', error)
-            reject(error)
-        }
-    })
-}
-
-const memoryCache = new LRUCache({
-    max: 100,
-})
-
-const CACHE_DIR = path.join(process.cwd(), 'cache');//path.join(import.meta.dirname, '../../cache');
-(async () => {
-    await fs.mkdir(CACHE_DIR, { recursive: true })
-})()
-
-const getImage = async (item) => {
-    if (item == undefined || item == null || item == '')
-        return null
-
-    item = item.toString()
-    const cacheKey = item.toLowerCase()
-
-    // Check memory cache first
-    const memCached = memoryCache.get(cacheKey)
-    if (memCached) return memCached
-
-    try {
-        const diskCacheKey = crypto.createHash('md5').update(cacheKey).digest('hex')
-        const diskCachePath = path.join(CACHE_DIR, `${diskCacheKey}.png`)
-        
-        // Check disk cache
-        const diskCached = await fs.readFile(diskCachePath)
-            .then(async data => await loadImage(data))
-            .catch(() => null)
-            
-        if (diskCached) {
-            memoryCache.set(cacheKey, diskCached);
-            return diskCached
-        }
-
-        // Fetch and process image
-        let data = await axios.get(
-            `https://${process.env.DO_SPACE_ENDPOINT}item-sprite/${item}.webp`,
-            { responseType: 'arraybuffer' }
-        )
-        
-        const pngBuffer = await sharp(data.data).png().toBuffer()
-        const image = await loadImage(pngBuffer)
-
-        // Store in both caches
-        memoryCache.set(cacheKey, image)
-        await fs.writeFile(diskCachePath, pngBuffer)
-
-        return image
-    } 
-    catch (error) {
-        console.error(`Failed to load image for ${item}:`, error.message)
-        return null
+    } catch (error) {
+        console.error('Avatar generation failed:', error)
+        throw error
+    } finally {
+        // Cleanup resources
+        resources.forEach(resource => {
+            if (resource && typeof resource.destroy === 'function') {
+                try {
+                    resource.destroy()
+                } catch (error) {
+                    console.warn('Resource cleanup failed:', error.message)
+                }
+            }
+        })
     }
 }
 
+// Rest of the helper functions remain similar but with added error handling...
+
 const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
-    // Canvas size for single direction (425x850)
     const canvas = createCanvas(425, 850)
     const ctx = canvas.getContext('2d')
     
-    // Calculate x offset based on direction (0-5)
-    const sourceX = direction * 425
-    
-    // Different layer orders based on direction
-    const getFacingOrder = (direction) => {
-        // Forward-facing (0)
-        if (direction === 0) {
-            return [
-                "base",
-                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "wings", "glasses",
-                "hair_behind",
-                "socks",
-                "shoes_before",
-                "gloves", "bottom", "belt",
-                "shoes_after",
-                "bracelets", "handheld",
-                "top",
-                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
-                "bag"
-            ]
+    try {
+        const sourceX = direction * 425
+        
+        const getFacingOrder = (direction) => {
+            if (direction === 0) {
+                return [
+                    "base",
+                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                    "wings", "glasses",
+                    "hair_behind",
+                    "socks",
+                    "shoes_before",
+                    "gloves", "bottom", "belt",
+                    "shoes_after",
+                    "bracelets", "handheld",
+                    "top",
+                    "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                    "bag"
+                ]
+            }
+            else if ([1, 4].includes(direction)) {
+                return [
+                    "base",
+                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                    "glasses",
+                    "hair_behind",
+                    "socks",
+                    "shoes_before",
+                    "gloves", "bottom", "belt",
+                    "shoes_after",
+                    "bracelets", "handheld",
+                    "top",
+                    "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                    "wings", "bag"
+                ]
+            }
+            else if ([2, 5].includes(direction)) {
+                return [
+                    "base",
+                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                    "wings", "glasses",
+                    "socks",
+                    "shoes_before",
+                    "gloves", "bottom", "belt",
+                    "shoes_after",
+                    "bracelets", "handheld",
+                    "top", "necklace",
+                    "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
+                    "bag"
+                ]
+            }
+            else {
+                return [
+                    "base",
+                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                    "socks",
+                    "shoes_before",
+                    "gloves", "bottom", "belt",
+                    "shoes_after",
+                    "bracelets", "handheld",
+                    "piercings", "earPiece", "glasses",
+                    "horns",
+                    "top", "necklace", "coat", "hair_infront",
+                    "hair_behind", "hat", "neckwear",
+                    "wings", "bag"
+                ]
+            }
         }
-        else if ([1, 4].includes(direction)) {
-            return [
-                "base",
-                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "glasses",
-                "hair_behind",
-                "socks",
-                "shoes_before",
-                "gloves", "bottom", "belt",
-                "shoes_after",
-                "bracelets", "handheld",
-                "top",
-                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
-                "wings", "bag"
-            ]
+
+        const layerOrder = getFacingOrder(direction)
+        
+        for (const layerName of layerOrder) {
+            let layer = null
+            
+            if (layerName === 'shoes_before' && !shoesBehindPants) {
+                layer = layers["shoes"]
+            } else if (layerName === 'shoes_after' && shoesBehindPants) {
+                layer = layers["shoes"]
+            } else if (layerName === 'hair_behind' && !hairInfrontTop) {
+                layer = layers["hair"]
+            } else if (layerName === 'hair_infront' && hairInfrontTop) {
+                layer = layers["hair"]
+            } else {
+                layer = layers[layerName]
+            }
+            
+            if (!layer) continue
+
+            try {
+                ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
+            } catch (error) {
+                console.warn(`Failed to draw layer ${layerName}:`, error.message)
+            }
         }
-        else if ([2, 5].includes(direction)) {
-            return [
-                "base",
-                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "wings", "glasses",
-                "socks",
-                "shoes_before",
-                "gloves", "bottom", "belt",
-                "shoes_after",
-                "bracelets", "handheld",
-                "top", "necklace",
-                "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
-                "bag"
-            ]
-        }
-        // Back view (3)
-        else {
-            return [
-                "base",
-                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                "socks",
-                "shoes_before",
-                "gloves", "bottom", "belt",
-                "shoes_after",
-                "bracelets", "handheld",
-                "piercings", "earPiece", "glasses",
-                "horns",
-                "top", "necklace", "coat", "hair_infront",
-                "hair_behind", "hat", "neckwear",
-                "wings", "bag"
-            ]
-        }
+
+        return canvas.toBuffer()
+    } catch (error) {
+        console.error('Directional avatar generation failed:', error)
+        throw error
+    } finally {
+        // Canvas cleanup is handled by garbage collector
     }
-
-    // Draw layers in the correct order for this direction
-    const layerOrder = getFacingOrder(direction)
-    for (const layerName of layerOrder) {
-        let layer = null
-        if (layerName == 'shoes_before' && !shoesBehindPants)
-            layer = layers["shoes"]
-        else if (layerName == 'shoes_after' && shoesBehindPants)
-            layer = layers["shoes"]
-        else if (layerName == 'hair_behind' && !hairInfrontTop)
-            layer = layers["hair"]
-        else if (layerName == 'hair_infront' && hairInfrontTop)
-            layer = layers["hair"]
-        else
-            layer = layers[layerName]
-        if (!layer) continue
-
-        if (layerName === 'hair_behind' && !hairInfrontTop) {
-            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-        }
-        else if (layerName === 'hair_infront' && hairInfrontTop) {
-            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-        }
-        // Special handling for shoes behind pants
-        else if (layerName === 'shoes_before' && !shoesBehindPants) {
-            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-        }
-        else if (layerName === 'shoes_after' && shoesBehindPants) {
-            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-        }
-        // Normal layer drawing
-        else {
-            ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-        }
-    }
-
-    return canvas.toBuffer()
 }
 
 const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontTop) => {
-    // Final sprite sheet canvas
     const canvas = createCanvas(2550, 850)
     const ctx = canvas.getContext('2d')
-
-    // Combine all tattoos into a single layer for simplicity
-    const combineTattoos = async (tattooLayers) => {
+    
+    try {
+        // Combine tattoos
         const tattooCanvas = createCanvas(2550, 850)
         const tattooCtx = tattooCanvas.getContext('2d')
         
-        for (const [key, tattoo] of Object.entries(tattooLayers)) {
-            if (key.startsWith('tattoos') && tattoo) {
-                tattooCtx.drawImage(tattoo, 0, 0)
+        for (const [key, tattoo] of Object.entries(allLayers)) {
+            if (key.startsWith('tattoo_') && tattoo) {
+                try {
+                    tattooCtx.drawImage(tattoo, 0, 0)
+                } catch (error) {
+                    console.warn(`Failed to draw tattoo ${key}:`, error.message)
+                }
             }
         }
         
-        return await loadImage(tattooCanvas.toBuffer())
-    }
-
-    // Create layers object with combined tattoos
-    const tattoos = await combineTattoos(allLayers)
-    const layers = {
-        ...allLayers,
-        tattoos,
-    }
-
-    // Remove individual tattoo layers to prevent double-drawing
-    Object.keys(layers).forEach(key => {
-        if (key.startsWith('tattoos') && key !== 'tattoos') {
-            delete layers[key]
+        const tattoos = await loadImage(tattooCanvas.toBuffer())
+        
+        const layers = {
+            ...allLayers,
+            tattoos,
         }
-    })
 
-    // Generate each direction
-    for (let direction = 0; direction < 6; direction++) {
-        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
-        ctx.drawImage(
-            await loadImage(directionCanvas),
-            direction * 425, 0  // Place each direction in its correct position
-        )
+        // Remove individual tattoo layers
+        Object.keys(layers).forEach(key => {
+            if (key.startsWith('tattoo_')) {
+                delete layers[key]
+            }
+        })
+
+        // Generate each direction
+        for (let direction = 0; direction < 6; direction++) {
+            try {
+                const directionCanvas = await generateDirectionalAvatar(
+                    direction,
+                    layers,
+                    shoesBehindPants,
+                    hairInfrontTop
+                )
+                const directionImage = await loadImage(directionCanvas)
+                ctx.drawImage(directionImage, direction * 425, 0)
+            } catch (error) {
+                console.error(`Failed to generate direction ${direction}:`, error)
+                // Continue with other directions
+            }
+        }
+
+        return canvas.toBuffer()
+    } catch (error) {
+        console.error('Sprite sheet generation failed:', error)
+        throw error
     }
-
-    return canvas.toBuffer()
 }
 
 async function cropImage(sourceImage, x, y, width, height) {
@@ -443,126 +736,121 @@ async function cropImage(sourceImage, x, y, width, height) {
         const ctx = canvas.getContext('2d')
         ctx.drawImage(loadedImage, x, y, width, height, 0, 0, width, height)
         return canvas.toBuffer()
-    }
-    catch (error) {
-        console.error('Error processing images:', error)
+    } catch (error) {
+        console.error('Error cropping image:', error)
         throw error
     }
 }
 
-// Batch process avatar deletion for old files
+// Enhanced cleanup with error handling
 const cleanupOldAvatars = async () => {
-    const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
-    const files = await fs.readdir(avatarsDir)
-    const now = Date.now()
-    const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
-    
-    for (const file of files) {
-        try {
-            const filePath = path.join(avatarsDir, file)
-            const stats = await fs.stat(filePath)
-            if (now - stats.mtimeMs > maxAge) {
-                await fs.unlink(filePath)
-            }
-        } catch (error) {
-            console.error(`Error cleaning up file ${file}:`, error)
-        }
-    }
-}
-
-// Run cleanup periodically
-setInterval(cleanupOldAvatars, 24 * 60 * 60 * 1000) // Once per day
-
-/**
- * Clears all caches: memory caches and disk cache
- * @returns {Promise<Object>} Results of the cache clearing operations
- */
-const clearAllCaches = async () => {
     try {
-        const results = {
-            memoryCachesCleared: false,
-            diskCacheCleared: false,
-            errors: []
-        }
-
-        // Clear memory caches
-        try {
-            avatarCache.clear()
-            memoryCache.clear()
-            results.memoryCachesCleared = true
-        } catch (error) {
-            results.errors.push({
-                type: 'memory_cache',
-                error: error.message
-            })
-        }
-
-        // Clear disk cache
-        try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
-            const files = await fs.readdir(CACHE_DIR)
-            
-            await Promise.all(files.map(async (file) => {
-                const filePath = path.join(CACHE_DIR, file)
-                try {
+        const files = await fs.readdir(AVATARS_DIR)
+        const now = Date.now()
+        const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
+        
+        const cleanupPromises = files.map(async (file) => {
+            try {
+                const filePath = path.join(AVATARS_DIR, file)
+                const stats = await fs.stat(filePath)
+                
+                if (now - stats.mtimeMs > maxAge) {
                     await fs.unlink(filePath)
-                } catch (error) {
-                    results.errors.push({
-                        type: 'disk_cache_file',
-                        file: file,
-                        error: error.message
-                    })
+                    console.log(`Cleaned up old avatar: ${file}`)
                 }
-            }))
-
-            results.diskCacheCleared = true
-        } catch (error) {
-            if (error.code !== 'ENOENT') { // Ignore error if cache directory doesn't exist
-                results.errors.push({
-                    type: 'disk_cache_dir',
-                    error: error.message
-                })
+            } catch (error) {
+                console.error(`Error cleaning up file ${file}:`, error.message)
             }
-        }
+        })
 
-        // Create fresh cache directory
-        try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
-            await fs.mkdir(CACHE_DIR, { recursive: true })
-        } catch (error) {
-            results.errors.push({
-                type: 'cache_dir_creation',
-                error: error.message
-            })
-        }
-
-        return results
+        await Promise.all(cleanupPromises)
+        console.log('Avatar cleanup completed')
     } catch (error) {
-        throw new Error(`Failed to clear caches: ${error.message}`)
+        console.error('Avatar cleanup failed:', error)
     }
 }
 
-/**
- * Express middleware to handle cache clearing requests
- */
+// Run cleanup periodically with error recovery
+let cleanupInterval
+const startCleanupInterval = () => {
+    cleanupInterval = setInterval(() => {
+        cleanupOldAvatars().catch(error => {
+            console.error('Cleanup interval error:', error)
+        })
+    }, 24 * 60 * 60 * 1000) // Once per day
+}
+
+startCleanupInterval()
+
+// Enhanced cache clearing
+const clearAllCaches = async () => {
+    const results = {
+        memoryCachesCleared: false,
+        diskCacheCleared: false,
+        avatarsCleaned: false,
+        errors: []
+    }
+
+    // Clear memory caches
+    try {
+        avatarCache.clear()
+        memoryCache.clear()
+        results.memoryCachesCleared = true
+    } catch (error) {
+        results.errors.push({
+            type: 'memory_cache',
+            error: error.message
+        })
+    }
+
+    // Clear disk cache
+    try {
+        const files = await fs.readdir(CACHE_DIR)
+        
+        await Promise.allSettled(files.map(async (file) => {
+            const filePath = path.join(CACHE_DIR, file)
+            await fs.unlink(filePath)
+        }))
+
+        results.diskCacheCleared = true
+    } catch (error) {
+        if (error.code !== 'ENOENT') {
+            results.errors.push({
+                type: 'disk_cache',
+                error: error.message
+            })
+        }
+    }
+
+    // Clean old avatars
+    try {
+        await cleanupOldAvatars()
+        results.avatarsCleaned = true
+    } catch (error) {
+        results.errors.push({
+            type: 'avatar_cleanup',
+            error: error.message
+        })
+    }
+
+    return results
+}
+
+// Cache clear handler
 const handleCacheClear = async (req, res) => {
     try {
         const results = await clearAllCaches()
         
-        if (results.errors.length === 0) {
-            res.status(200).json({
-                success: true,
-                message: 'All caches cleared successfully',
-                details: results
-            })
-        } else {
-            res.status(207).json({
-                success: true,
-                message: 'Caches cleared with some errors',
-                details: results
-            })
-        }
+        const status = results.errors.length === 0 ? 200 : 207
+        res.status(status).json({
+            success: results.errors.length === 0,
+            message: results.errors.length === 0 
+                ? 'All caches cleared successfully' 
+                : 'Caches cleared with some errors',
+            details: results
+        })
     } catch (error) {
+        console.error('Cache clear failed:', error)
         res.status(500).json({
             success: false,
             message: 'Failed to clear caches',
@@ -571,4 +859,75 @@ const handleCacheClear = async (req, res) => {
     }
 }
 
-export default { getAvatar, clearAllCaches, handleCacheClear }
+// Health check endpoint
+const healthCheck = async (req, res) => {
+    const health = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        caches: {
+            avatar: {
+                size: avatarCache.size,
+                calculatedSize: avatarCache.calculatedSize
+            },
+            memory: {
+                size: memoryCache.size,
+                calculatedSize: memoryCache.calculatedSize
+            }
+        },
+        services: {
+            s3: s3CircuitBreaker.state,
+            imageLoad: imageLoadCircuitBreaker.state
+        },
+        generationLocks: generationLocks.size
+    }
+
+    // Test S3 connectivity
+    try {
+        await s3.headBucket({ Bucket: process.env.DO_SPACE_NAME }).promise()
+        health.services.s3Connected = true
+    } catch (error) {
+        health.services.s3Connected = false
+        health.status = 'degraded'
+    }
+
+    res.status(health.status === 'ok' ? 200 : 503).json(health)
+}
+
+// Graceful shutdown
+const gracefulShutdown = async () => {
+    console.log('Starting graceful shutdown...')
+    
+    // Stop accepting new requests
+    if (cleanupInterval) {
+        clearInterval(cleanupInterval)
+    }
+
+    // Wait for ongoing generations
+    const maxWait = 30000 // 30 seconds
+    const startTime = Date.now()
+    
+    while (generationLocks.size > 0 && Date.now() - startTime < maxWait) {
+        console.log(`Waiting for ${generationLocks.size} generations to complete...`)
+        await sleep(1000)
+    }
+
+    // Clear caches
+    await clearAllCaches()
+
+    console.log('Graceful shutdown completed')
+    process.exit(0)
+}
+
+// Register shutdown handlers
+process.on('SIGTERM', gracefulShutdown)
+process.on('SIGINT', gracefulShutdown)
+
+// Export enhanced API
+export default {
+    getAvatar,
+    clearAllCaches,
+    handleCacheClear,
+    healthCheck
+}
