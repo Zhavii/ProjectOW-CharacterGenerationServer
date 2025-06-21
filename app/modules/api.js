@@ -8,7 +8,6 @@ import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import AWS from 'aws-sdk'
-import { fileURLToPath } from 'url'
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
@@ -20,9 +19,7 @@ const s3 = new AWS.S3({
   secretAccessKey: process.env.DO_SPACE_KEY
 });
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const AVATARS_DIR = path.join(__dirname, '../../avatars')
-//const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
+const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
 (async () => {
     await fs.mkdir(AVATARS_DIR, { recursive: true })
 })()
@@ -75,7 +72,7 @@ const getAvatar = async (req, res) => {
         }
 
         if (user.customizationHash === hash && type !== 'sprite') {
-            const avatarPath = path.join(AVATARS_DIR, `${hash}.webp`)//path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
+            const avatarPath = path.join(process.cwd(), 'avatars', `${hash}.webp`)//path.join(import.meta.dirname, '../../avatars', `${hash}.webp`)
             const stats = await fs.stat(avatarPath)
             if (stats.isFile()) {
                 // Stream the file instead of loading into memory
