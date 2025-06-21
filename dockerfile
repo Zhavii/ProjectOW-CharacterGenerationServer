@@ -1,24 +1,24 @@
-# Dockerfile
 FROM node:22-slim
 
-# 1. Install canvas’s native deps
+# 1. Install native and build-tool deps for canvas
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      libcairo2-dev \
-      libpango1.0-dev \
-      libjpeg-dev \
-      libgif-dev \
-      librsvg2-dev && \
+        build-essential \
+        libcairo2-dev \
+        libpango1.0-dev \
+        libjpeg-dev \
+        libgif-dev \
+        librsvg2-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# 2. Copy and install your app
+# 2. Set your workdir, copy package files, install deps
 WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm ci
 
-# 3. Bundle the rest of your source
+# 3. Copy the rest of your code (including app/)
 COPY . .
 
-# 4. Listen on the App Platform port
-ENV PORT  $PORT
-CMD ["node", "api.js"]
+# 4. Tell Node to run your real entrypoint
+ENV PORT $PORT
+CMD ["node", "app/app.js"]
