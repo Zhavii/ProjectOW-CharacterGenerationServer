@@ -51,6 +51,14 @@ const getParamsAvatar = (username) => {
     }
 }
 
+const getParamsThumbnail = (username) => {
+    return {
+        Bucket: process.env.DO_SPACE_NAME,
+        Key: `user-thumbnail/${username}.webp`,
+        Expires: 3600 // URL expires in 1 hour
+    }
+}
+
 const getAvatar = async (req, res) => {
     try {
         const type = req.params.type
@@ -71,7 +79,12 @@ const getAvatar = async (req, res) => {
             return res.status(307).redirect(signedUrl)
         }
 
-        if (type !== 'sprite') {
+        if (type === 'thumbnail' && user.customizationHash === hash) {
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsThumbnail(username))
+            return res.status(307).redirect(signedUrl)
+        }
+
+        if (type !== 'sprite' && type !== 'thumbnail') {
             // First check memory cache using username as key
             const cachedAvatar = avatarCache.get(hash)
             if (cachedAvatar) {
@@ -79,7 +92,7 @@ const getAvatar = async (req, res) => {
             }
         }
 
-        if (type !== 'sprite' && user.customizationHash === hash) {
+        if (type !== 'sprite' && type !== 'thumbnail' && user.customizationHash === hash) {
             const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(username))
             return res.status(307).redirect(signedUrl)
         }
@@ -87,7 +100,7 @@ const getAvatar = async (req, res) => {
         // Generate avatar if needed
         const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
         
-        if (type !== 'sprite') {
+        if (type !== 'sprite' && type !== 'thumbnail') {
             // Send response immediately
             return res.status(200).send(generatedAvatar)
         }
@@ -196,6 +209,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 
             if (type === 'sprite') {
                 const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
+                return res.status(307).redirect(signedUrl)
+            }
+            else if (type === 'thumbnail') {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsThumbnail(user.username))
                 return res.status(307).redirect(signedUrl)
             }
             else {
