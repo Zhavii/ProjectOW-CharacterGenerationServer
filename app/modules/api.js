@@ -1,5 +1,4 @@
 import { xxHash32 } from 'js-xxhash'
-import { createCanvas, loadImage } from 'canvas'
 import uploadContent from './uploadContent.js'
 import axios from 'axios'
 import fs from 'fs/promises'
@@ -67,7 +66,7 @@ const memoryCache = new LRUCache({
     ttl: 1000 * 60 * 30, // 30 minutes
     sizeCalculation: (value) => {
         // Estimate image size in memory
-        return value.width * value.height * 4 // 4 bytes per pixel
+        return value.data.length
     },
     maxSize: 1024 * 1024 * 100 // 100MB max
 })
@@ -297,6 +296,14 @@ const getAvatar = async (req, res) => {
 // Enhanced image loading with concurrency control
 const imageLoadLimit = pLimit(MAX_IMAGE_LOAD_CONCURRENT)
 
+// Helper to convert images to a consistent format for processing
+const prepareImageForCompositing = async (buffer) => {
+    return sharp(buffer)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true })
+}
+
 const getImage = async (item) => {
     if (!item) return null
 
@@ -315,9 +322,9 @@ const getImage = async (item) => {
             
             try {
                 const diskData = await fs.readFile(diskCachePath)
-                const image = await loadImage(diskData)
-                memoryCache.set(cacheKey, image)
-                return image
+                const imageData = await prepareImageForCompositing(diskData)
+                memoryCache.set(cacheKey, imageData)
+                return imageData
             } catch (error) {
                 // Disk cache miss, continue to fetch
             }
@@ -340,19 +347,19 @@ const getImage = async (item) => {
             // Process and cache
             const pngBuffer = await sharp(data)
                 .png()
-                .toBuffer({ resolveWithObject: false })
+                .toBuffer()
 
-            const image = await loadImage(pngBuffer)
+            const imageData = await prepareImageForCompositing(pngBuffer)
 
             // Store in caches
-            memoryCache.set(cacheKey, image)
+            memoryCache.set(cacheKey, imageData)
             
             // Write to disk cache asynchronously
             fs.writeFile(diskCachePath, pngBuffer).catch(error => {
                 console.warn('Failed to write disk cache:', error.message)
             })
 
-            return image
+            return imageData
         } catch (error) {
             console.error(`Failed to load image for ${itemId}:`, error.message)
             return null
@@ -362,8 +369,6 @@ const getImage = async (item) => {
 
 // Enhanced avatar generation with better error handling
 const createAvatarThumbnail = async (user, hash, type, res) => {
-    const resources = []
-    
     try {
         // Validate customization data
         if (!user.customization || typeof user.customization !== 'object') {
@@ -381,7 +386,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
 
         // Load all images with proper error handling
         const imagePromises = {
-            base: loadImage(baseBuffer),
+            base: prepareImageForCompositing(baseBuffer),
             makeup: getImage(user.customization.makeup),
             hair: getImage(user.customization.hair),
             beard: getImage(user.customization.beard),
@@ -468,11 +473,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             shoesBehindPants,
             hairInfrontTop
         )
-        resources.push(spriteSheet)
 
-        // Generate front-facing avatar
-        const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850)
-        const frontFacingBuffer = await sharp(frontFacingAvatar)
+        // Generate front-facing avatar - extract first frame (0, 0, 425, 850)
+        const frontFacingBuffer = await sharp(spriteSheet)
+            .extract({ left: 0, top: 0, width: 425, height: 850 })
             .webp({ quality: 95, effort: 4 })
             .toBuffer()
 
@@ -485,8 +489,10 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
         // Update cache
         avatarCache.set(hash, frontFacingBuffer)
 
-        // Generate thumbnail
-        const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
+        // Generate thumbnail - extract from sprite sheet at (103, 42, 218, 218)
+        const thumbnailBuffer = await sharp(spriteSheet)
+            .extract({ left: 103, top: 42, width: 218, height: 218 })
+            .toBuffer()
 
         // Upload generated images with retry
         try {
@@ -495,7 +501,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                     uploadContent(user.clothing, { data: spriteSheet }, 'user-clothing', 5, "DONT", undefined, user.username)
                 ),
                 retryWithBackoff(() =>
-                    uploadContent(user.thumbnail, { data: thumbnail }, 'user-thumbnail', 5, undefined, undefined, user.username)
+                    uploadContent(user.thumbnail, { data: thumbnailBuffer }, 'user-thumbnail', 5, undefined, undefined, user.username)
                 ),
                 retryWithBackoff(() =>
                     uploadContent(user.avatar, { data: frontFacingBuffer }, 'user-avatar', 5, "N", undefined, user.username)
@@ -536,166 +542,202 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
     } catch (error) {
         console.error('Avatar generation failed:', error)
         throw error
-    } finally {
-        // Cleanup resources
-        resources.forEach(resource => {
-            if (resource && typeof resource.destroy === 'function') {
-                try {
-                    resource.destroy()
-                } catch (error) {
-                    console.warn('Resource cleanup failed:', error.message)
-                }
-            }
-        })
     }
 }
 
-// Rest of the helper functions remain similar but with added error handling...
-
-const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
-    const canvas = createCanvas(425, 850)
-    const ctx = canvas.getContext('2d')
+// Convert loaded images to Sharp format for compositing
+const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop, width = 425, height = 850) => {
+    const sourceX = direction * width
     
-    try {
-        const sourceX = direction * 425
-        
-        const getFacingOrder = (direction) => {
-            if (direction === 0) {
-                return [
-                    "base",
-                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                    "wings", "glasses",
-                    "hair_behind",
-                    "socks",
-                    "shoes_before",
-                    "gloves", "bottom", "belt",
-                    "shoes_after",
-                    "bracelets", "handheld",
-                    "top",
-                    "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
-                    "bag"
-                ]
-            }
-            else if ([1, 4].includes(direction)) {
-                return [
-                    "base",
-                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                    "glasses",
-                    "hair_behind",
-                    "socks",
-                    "shoes_before",
-                    "gloves", "bottom", "belt",
-                    "shoes_after",
-                    "bracelets", "handheld",
-                    "top",
-                    "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
-                    "wings", "bag"
-                ]
-            }
-            else if ([2, 5].includes(direction)) {
-                return [
-                    "base",
-                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                    "wings", "glasses",
-                    "socks",
-                    "shoes_before",
-                    "gloves", "bottom", "belt",
-                    "shoes_after",
-                    "bracelets", "handheld",
-                    "top", "necklace",
-                    "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
-                    "bag"
-                ]
-            }
-            else {
-                return [
-                    "base",
-                    "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
-                    "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
-                    "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
-                    "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
-                    "socks",
-                    "shoes_before",
-                    "gloves", "bottom", "belt",
-                    "shoes_after",
-                    "bracelets", "handheld",
-                    "piercings", "earPiece", "glasses",
-                    "horns",
-                    "top", "necklace", "coat", "hair_infront",
-                    "hair_behind", "hat", "neckwear",
-                    "wings", "bag"
-                ]
-            }
+    const getFacingOrder = (direction) => {
+        if (direction === 0) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "wings", "glasses",
+                "hair_behind",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                "bag"
+            ]
         }
-
-        const layerOrder = getFacingOrder(direction)
-        
-        for (const layerName of layerOrder) {
-            let layer = null
-            
-            if (layerName === 'shoes_before' && !shoesBehindPants) {
-                layer = layers["shoes"]
-            } else if (layerName === 'shoes_after' && shoesBehindPants) {
-                layer = layers["shoes"]
-            } else if (layerName === 'hair_behind' && !hairInfrontTop) {
-                layer = layers["hair"]
-            } else if (layerName === 'hair_infront' && hairInfrontTop) {
-                layer = layers["hair"]
-            } else {
-                layer = layers[layerName]
-            }
-            
-            if (!layer) continue
-
-            try {
-                ctx.drawImage(layer, sourceX, 0, 425, 850, 0, 0, 425, 850)
-            } catch (error) {
-                console.warn(`Failed to draw layer ${layerName}:`, error.message)
-            }
+        else if ([1, 4].includes(direction)) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "glasses",
+                "hair_behind",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top",
+                "necklace", "coat", "neckwear", "hair_infront", "piercings", "earPiece", "hat", "horns",
+                "wings", "bag"
+            ]
         }
-
-        return canvas.toBuffer()
-    } catch (error) {
-        console.error('Directional avatar generation failed:', error)
-        throw error
-    } finally {
-        // Canvas cleanup is handled by garbage collector
+        else if ([2, 5].includes(direction)) {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "wings", "glasses",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "top", "necklace",
+                "coat", "hair_behind", "piercings", "earPiece", "neckwear", "hair_infront", "hat", "horns",
+                "bag"
+            ]
+        }
+        else {
+            return [
+                "base",
+                "tattoo_head", "tattoo_neck", "tattoo_chest", "tattoo_stomach",
+                "tattoo_backUpper", "tattoo_backLower", "tattoo_armRight",
+                "tattoo_armLeft", "tattoo_legRight", "tattoo_legLeft",
+                "makeup", "eyes", "eyebrows", "head", "nose", "mouth", "beard",
+                "socks",
+                "shoes_before",
+                "gloves", "bottom", "belt",
+                "shoes_after",
+                "bracelets", "handheld",
+                "piercings", "earPiece", "glasses",
+                "horns",
+                "top", "necklace", "coat", "hair_infront",
+                "hair_behind", "hat", "neckwear",
+                "wings", "bag"
+            ]
+        }
     }
+
+    const layerOrder = getFacingOrder(direction)
+    
+    // Start with transparent base
+    let composite = sharp({
+        create: {
+            width,
+            height,
+            channels: 4,
+            background: { r: 0, g: 0, b: 0, alpha: 0 }
+        }
+    })
+    
+    const compositeInputs = []
+    
+    for (const layerName of layerOrder) {
+        let layer = null
+        
+        if (layerName === 'shoes_before' && !shoesBehindPants) {
+            layer = layers["shoes"]
+        } else if (layerName === 'shoes_after' && shoesBehindPants) {
+            layer = layers["shoes"]
+        } else if (layerName === 'hair_behind' && !hairInfrontTop) {
+            layer = layers["hair"]
+        } else if (layerName === 'hair_infront' && hairInfrontTop) {
+            layer = layers["hair"]
+        } else {
+            layer = layers[layerName]
+        }
+        
+        if (!layer || !layer.data) continue
+
+        try {
+            // For sprite sheets, we need to extract the correct portion
+            const extractedLayer = await sharp(layer.data, {
+                raw: {
+                    width: layer.info.width,
+                    height: layer.info.height,
+                    channels: layer.info.channels
+                }
+            })
+            .extract({
+                left: sourceX,
+                top: 0,
+                width: width,
+                height: height
+            })
+            .toBuffer()
+
+            compositeInputs.push({
+                input: extractedLayer,
+                raw: {
+                    width: width,
+                    height: height,
+                    channels: 4
+                }
+            })
+        } catch (error) {
+            console.warn(`Failed to process layer ${layerName}:`, error.message)
+        }
+    }
+    
+    if (compositeInputs.length > 0) {
+        composite = composite.composite(compositeInputs)
+    }
+    
+    return composite.toBuffer()
 }
 
 const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontTop) => {
-    const canvas = createCanvas(2550, 850)
-    const ctx = canvas.getContext('2d')
+    const spriteWidth = 2550
+    const spriteHeight = 850
+    const frameWidth = 425
+    const frameHeight = 850
     
     try {
-        // Combine tattoos
-        const tattooCanvas = createCanvas(2550, 850)
-        const tattooCtx = tattooCanvas.getContext('2d')
+        // First, combine all tattoos into a single layer
+        const tattooCompositeInputs = []
         
         for (const [key, tattoo] of Object.entries(allLayers)) {
-            if (key.startsWith('tattoo_') && tattoo) {
-                try {
-                    tattooCtx.drawImage(tattoo, 0, 0)
-                } catch (error) {
-                    console.warn(`Failed to draw tattoo ${key}:`, error.message)
-                }
+            if (key.startsWith('tattoo_') && tattoo && tattoo.data) {
+                tattooCompositeInputs.push({
+                    input: tattoo.data,
+                    raw: {
+                        width: tattoo.info.width,
+                        height: tattoo.info.height,
+                        channels: tattoo.info.channels
+                    }
+                })
             }
         }
         
-        const tattoos = await loadImage(tattooCanvas.toBuffer())
-        
+        let tattooLayer = null
+        if (tattooCompositeInputs.length > 0) {
+            const tattooCombined = await sharp({
+                create: {
+                    width: spriteWidth,
+                    height: spriteHeight,
+                    channels: 4,
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                }
+            })
+            .composite(tattooCompositeInputs)
+            .raw()
+            .toBuffer({ resolveWithObject: true })
+            
+            tattooLayer = tattooCombined
+        }
+
         const layers = {
             ...allLayers,
-            tattoos,
+            ...(tattooLayer && { tattoos: tattooLayer })
         }
 
         // Remove individual tattoo layers
@@ -705,39 +747,44 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
             }
         })
 
+        // Create the full sprite sheet
+        const spriteSheet = sharp({
+            create: {
+                width: spriteWidth,
+                height: spriteHeight,
+                channels: 4,
+                background: { r: 0, g: 0, b: 0, alpha: 0 }
+            }
+        })
+
+        const compositeInputs = []
+
         // Generate each direction
         for (let direction = 0; direction < 6; direction++) {
             try {
-                const directionCanvas = await generateDirectionalAvatar(
+                const directionBuffer = await generateDirectionalAvatar(
                     direction,
                     layers,
                     shoesBehindPants,
-                    hairInfrontTop
+                    hairInfrontTop,
+                    frameWidth,
+                    frameHeight
                 )
-                const directionImage = await loadImage(directionCanvas)
-                ctx.drawImage(directionImage, direction * 425, 0)
+                
+                compositeInputs.push({
+                    input: directionBuffer,
+                    left: direction * frameWidth,
+                    top: 0
+                })
             } catch (error) {
                 console.error(`Failed to generate direction ${direction}:`, error)
                 // Continue with other directions
             }
         }
 
-        return canvas.toBuffer()
+        return spriteSheet.composite(compositeInputs).toBuffer()
     } catch (error) {
         console.error('Sprite sheet generation failed:', error)
-        throw error
-    }
-}
-
-async function cropImage(sourceImage, x, y, width, height) {
-    try {
-        const loadedImage = await loadImage(sourceImage)
-        const canvas = createCanvas(width, height)
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(loadedImage, x, y, width, height, 0, 0, width, height)
-        return canvas.toBuffer()
-    } catch (error) {
-        console.error('Error cropping image:', error)
         throw error
     }
 }
