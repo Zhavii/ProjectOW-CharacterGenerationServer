@@ -10,6 +10,10 @@ const getUrl = (location) => {
 }
 
 const getSpriteLocation = async (item) => {
+    if (!item) {
+        return null
+    }
+    
     /*
     let l = await Item.findById(item, 'spriteLocation').lean()
     if (!l) {
@@ -18,7 +22,6 @@ const getSpriteLocation = async (item) => {
 
     return getUrl(l.spriteLocation)
     */
-    https://maki.nyc3.digitaloceanspaces.com/item-preview/623347d6d96951a54708a1db.png
     return `https://${process.env.DO_SPACE_ENDPOINT}/item-sprite/${item}.webp`
 }
 

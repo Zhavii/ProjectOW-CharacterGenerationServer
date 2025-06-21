@@ -46,10 +46,10 @@ const getAvatar = async (req, res) => {
     try {
         const type = req.params.type
         const username = req.params.username
-        
+
         // Find user with minimal projection
         const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true })
-        
+
         if (!user) {
             return res.status(404).send('User not found.')
         }
@@ -83,7 +83,7 @@ const getAvatar = async (req, res) => {
 
         // Generate avatar if needed
         const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
-        
+
         if (type !== 'sprite') {
             // Send response immediately
             return res.status(200).send(generatedAvatar)
@@ -101,7 +101,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             // Determine base image based on user customization
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
-            
+
             const baseDir = path.join(process.cwd(), '_bases', base)//path.join(import.meta.dirname, '../../_bases', base)
             const baseBuffer = await fs.readFile(baseDir)
 
@@ -217,6 +217,10 @@ const CACHE_DIR = path.join(process.cwd(), 'cache');//path.join(import.meta.dirn
     await fs.mkdir(CACHE_DIR, { recursive: true })
 })()
 
+// Ensure avatars directory exists
+const avatarDir = path.join(process.cwd(), 'avatars')
+await fs.mkdir(avatarDir, { recursive: true }).catch(() => {})
+
 const getImage = async (item) => {
     if (item == undefined || item == null || item == '')
         return null
@@ -231,11 +235,11 @@ const getImage = async (item) => {
     try {
         const diskCacheKey = crypto.createHash('md5').update(cacheKey).digest('hex')
         const diskCachePath = path.join(CACHE_DIR, `${diskCacheKey}.png`)
-        
+
         // Check disk cache
         const diskCached = await fs.readFile(diskCachePath)
             .catch(() => null)
-            
+
         if (diskCached) {
             memoryCache.set(cacheKey, diskCached);
             return diskCached
@@ -246,7 +250,7 @@ const getImage = async (item) => {
             `https://${process.env.DO_SPACE_ENDPOINT}item-sprite/${item}.webp`,
             { responseType: 'arraybuffer' }
         )
-        
+
         const pngBuffer = await sharp(data.data).png().toBuffer()
 
         // Store in both caches
@@ -264,7 +268,7 @@ const getImage = async (item) => {
 const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, hairInfrontTop) => {
     // Calculate x offset based on direction (0-5)
     const sourceX = direction * 425
-    
+
     // Different layer orders based on direction
     const getFacingOrder = (direction) => {
         // Forward-facing (0)
@@ -359,7 +363,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
     // Build composite array for this direction
     const compositeArray = []
     const layerOrder = getFacingOrder(direction)
-    
+
     for (const layerName of layerOrder) {
         let layer = null
         if (layerName == 'shoes_before' && !shoesBehindPants)
@@ -372,7 +376,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
             layer = layers["hair"]
         else
             layer = layers[layerName]
-        
+
         if (!layer) continue
 
         // For each layer, we need to extract the correct section and composite it
@@ -389,7 +393,7 @@ const generateDirectionalAvatar = async (direction, layers, shoesBehindPants, ha
 
     // Apply all composites at once
     compositeImage = await compositeImage.composite(compositeArray).toBuffer()
-    
+
     return compositeImage
 }
 
@@ -414,7 +418,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
                 background: { r: 0, g: 0, b: 0, alpha: 0 }
             }
         })
-        
+
         const tattooCompositeArray = []
         for (const [key, tattoo] of Object.entries(tattooLayers)) {
             if (key.startsWith('tattoo_') && tattoo) {
@@ -425,7 +429,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
                 })
             }
         }
-        
+
         if (tattooCompositeArray.length > 0) {
             return await tattooComposite.composite(tattooCompositeArray).toBuffer()
         }
@@ -458,7 +462,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
     }
 
     spriteSheet = await spriteSheet.composite(compositeArray).toBuffer()
-    
+
     return spriteSheet
 }
 
@@ -480,7 +484,7 @@ const cleanupOldAvatars = async () => {
     const files = await fs.readdir(avatarsDir)
     const now = Date.now()
     const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
-    
+
     for (const file of files) {
         try {
             const filePath = path.join(avatarsDir, file)
@@ -525,7 +529,7 @@ const clearAllCaches = async () => {
         try {
             const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
             const files = await fs.readdir(CACHE_DIR)
-            
+
             await Promise.all(files.map(async (file) => {
                 const filePath = path.join(CACHE_DIR, file)
                 try {
@@ -572,7 +576,7 @@ const clearAllCaches = async () => {
 const handleCacheClear = async (req, res) => {
     try {
         const results = await clearAllCaches()
-        
+
         if (results.errors.length === 0) {
             res.status(200).json({
                 success: true,
