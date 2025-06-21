@@ -9,6 +9,7 @@ import crypto from 'crypto'
 import AWS from 'aws-sdk'
 import pLimit from 'p-limit'
 import { EventEmitter } from 'events'
+import https from 'https'  // Add this import
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
@@ -28,7 +29,7 @@ const s3 = new AWS.S3({
     secretAccessKey: process.env.DO_SPACE_KEY,
     httpOptions: {
         timeout: 10000,
-        agent: new (require('https').Agent)({ keepAlive: true })
+        agent: new https.Agent({ keepAlive: true })  // Change this line
     }
 })
 
