@@ -26,7 +26,7 @@ const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.
 
 // In-memory cache for both avatar buffers and processed results
 const avatarCache = new LRUCache({
-    max: 20, // Adjust based on memory constraints
+    max: 5, // Adjust based on memory constraints
     ttl: 1000 * 60 * 60, // 1 hour TTL
     updateAgeOnGet: true
 })
