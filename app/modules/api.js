@@ -19,6 +19,27 @@ const s3 = new AWS.S3({
   secretAccessKey: process.env.DO_SPACE_KEY
 });
 
+/**
+ * Helper function to check if an object exists in DigitalOcean Spaces
+ * @param {Object} params - S3 parameters with Bucket and Key
+ * @returns {Promise<boolean>} - true if object exists, false otherwise
+ */
+const checkObjectExists = async (params) => {
+    try {
+        await s3.headObject({
+            Bucket: params.Bucket,
+            Key: params.Key
+        }).promise();
+        return true;
+    } catch (error) {
+        if (error.code === 'NotFound') {
+            return false;
+        }
+        // Re-throw other errors
+        throw error;
+    }
+};
+
 const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
 (async () => {
     await fs.mkdir(AVATARS_DIR, { recursive: true })
@@ -61,55 +82,82 @@ const getParamsThumbnail = (username) => {
 
 const getAvatar = async (req, res) => {
     try {
-        const type = req.params.type
-        const username = req.params.username
+        const type = req.params.type;
+        const username = req.params.username;
         
         // Find user with minimal projection
-        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true })
+        const user = await User.findOne({ username }, 'username customization customizationHash clothing thumbnail avatar', { lean: true });
         
         if (!user) {
-            return res.status(404).send('User not found.')
+            return res.status(404).send('User not found.');
         }
 
         // Calculate hash only once
-        const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString()
+        const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString();
 
         if (type === 'sprite' && user.customizationHash === hash) {
-            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(username))
-            return res.status(307).redirect(signedUrl)
+            const params = getParams(username);
+            
+            // Check if file exists on DigitalOcean
+            const exists = await checkObjectExists(params);
+            
+            if (exists) {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                return res.status(307).redirect(signedUrl);
+            }
+            // If doesn't exist, fall through to regenerate
+            console.log(`Sprite file not found on DO for user ${username}, regenerating...`);
         }
 
         if (type === 'thumbnail' && user.customizationHash === hash) {
-            const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsThumbnail(username))
-            return res.status(307).redirect(signedUrl)
+            const params = getParamsThumbnail(username);
+            
+            // Check if file exists on DigitalOcean
+            const exists = await checkObjectExists(params);
+            
+            if (exists) {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                return res.status(307).redirect(signedUrl);
+            }
+            // If doesn't exist, fall through to regenerate
+            console.log(`Thumbnail file not found on DO for user ${username}, regenerating...`);
         }
 
         if (type !== 'sprite' && type !== 'thumbnail') {
             // First check memory cache using username as key
-            const cachedAvatar = avatarCache.get(hash)
+            const cachedAvatar = avatarCache.get(hash);
             if (cachedAvatar) {
-                return res.status(200).send(cachedAvatar)
+                return res.status(200).send(cachedAvatar);
             }
         }
 
         if (type !== 'sprite' && type !== 'thumbnail' && user.customizationHash === hash) {
-            const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(username))
-            return res.status(307).redirect(signedUrl)
+            const params = getParamsAvatar(username);
+            
+            // Check if file exists on DigitalOcean
+            const exists = await checkObjectExists(params);
+            
+            if (exists) {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                return res.status(307).redirect(signedUrl);
+            }
+            // If doesn't exist, fall through to regenerate
+            console.log(`Avatar file not found on DO for user ${username}, regenerating...`);
         }
 
-        // Generate avatar if needed
-        const generatedAvatar = await createAvatarThumbnail(user, hash, type, res)
+        // Generate avatar if needed (file doesn't exist or hash mismatch)
+        const generatedAvatar = await createAvatarThumbnail(user, hash, type, res);
         
         if (type !== 'sprite' && type !== 'thumbnail') {
             // Send response immediately
-            return res.status(200).send(generatedAvatar)
+            return res.status(200).send(generatedAvatar);
         }
     } 
     catch (error) {
-        console.error('Avatar generation error:', error)
-        res.status(500).send('Error generating avatar')
+        console.error('Avatar generation error:', error);
+        res.status(500).send('Error generating avatar');
     }
-}
+};
 
 const createAvatarThumbnail = async (user, hash, type, res) => {
     return new Promise(async (resolve, reject) => {
