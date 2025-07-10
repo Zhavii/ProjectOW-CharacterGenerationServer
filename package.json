@@ -14,7 +14,6 @@
     "aws-sdk": "^2.1080.0",
     "axios": "^0.26.0",
     "bcrypt": "^5.0.1",
-    "bull": "^4.16.5",
     "canvas": "^2.11.2",
     "connect-flash": "^0.1.1",
     "connect-mongo": "^4.6.0",
