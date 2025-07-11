@@ -8,15 +8,120 @@ import sharp from 'sharp'
 import { LRUCache } from 'lru-cache'
 import crypto from 'crypto'
 import AWS from 'aws-sdk'
+import EventEmitter from 'events'
 
 import User from '../models/User.js'
 import Item from '../models/Item.js'
 
 const spacesEndpoint = new AWS.Endpoint(process.env.DO_ENDPOINT)
 const s3 = new AWS.S3({
-  endpoint: spacesEndpoint,
-  accessKeyId: process.env.DO_SPACE_ID,
-  secretAccessKey: process.env.DO_SPACE_KEY
+    endpoint: spacesEndpoint,
+    accessKeyId: process.env.DO_SPACE_ID,
+    secretAccessKey: process.env.DO_SPACE_KEY
+});
+
+// Queue system for avatar generation
+class AvatarQueue extends EventEmitter {
+    constructor() {
+        super();
+        this.queue = [];
+        this.processing = new Map(); // Track currently processing items
+        this.maxConcurrent = 2; // Maximum concurrent generations
+        this.maxQueueSize = 2; // Queue size threshold for returning old images
+    }
+
+    async add(task) {
+        const key = `${task.type}-${task.username}`;
+        
+        // Check if already processing
+        if (this.processing.has(key)) {
+            return { status: 'processing', promise: this.processing.get(key) };
+        }
+
+        // Check if already in queue
+        const existingIndex = this.queue.findIndex(t => 
+            t.type === task.type && t.username === task.username
+        );
+        
+        if (existingIndex !== -1) {
+            return { status: 'queued', position: existingIndex };
+        }
+
+        // Add to queue regardless of size
+        this.queue.push(task);
+        this.emit('task_added', task);
+        
+        // Start processing if under limit
+        setImmediate(() => this.process());
+        
+        // Return different status based on queue size
+        if (this.queue.length > this.maxQueueSize) {
+            return { 
+                status: 'queue_full_but_added', 
+                queueLength: this.queue.length,
+                position: this.queue.length - 1 
+            };
+        }
+        
+        return { status: 'queued', position: this.queue.length - 1 };
+    }
+
+    async process() {
+        if (this.processing.size >= this.maxConcurrent || this.queue.length === 0) {
+            return;
+        }
+
+        const task = this.queue.shift();
+        if (!task) return;
+
+        const key = `${task.type}-${task.username}`;
+        
+        const promise = this.executeTask(task);
+        this.processing.set(key, promise);
+
+        try {
+            await promise;
+        } finally {
+            this.processing.delete(key);
+            // Process next item
+            setImmediate(() => this.process());
+        }
+    }
+
+    async executeTask(task) {
+        try {
+            const result = await task.execute();
+            this.emit('task_completed', task, result);
+            return result;
+        } catch (error) {
+            this.emit('task_failed', task, error);
+            throw error;
+        }
+    }
+
+    getStatus() {
+        return {
+            queueLength: this.queue.length,
+            processing: this.processing.size,
+            totalPending: this.queue.length + this.processing.size
+        };
+    }
+}
+
+// Create singleton queue instance
+const avatarQueue = new AvatarQueue();
+
+// Log queue events (optional)
+avatarQueue.on('task_added', (task) => {
+    console.log(`Avatar generation queued: ${task.type}/${task.username}`);
+});
+
+avatarQueue.on('task_completed', (task) => {
+    console.log(`Avatar generation completed: ${task.type}/${task.username}`);
+});
+
+avatarQueue.on('task_failed', (task, error) => {
+    console.error(`Avatar generation failed: ${task.type}/${task.username}`, error);
 });
 
 /**
@@ -40,7 +145,7 @@ const checkObjectExists = async (params) => {
     }
 };
 
-const AVATARS_DIR = path.join(process.cwd(), 'avatars');//path.join(import.meta.dirname, '../../cache');
+const AVATARS_DIR = path.join(process.cwd(), 'avatars');
 (async () => {
     await fs.mkdir(AVATARS_DIR, { recursive: true })
 })()
@@ -95,67 +200,137 @@ const getAvatar = async (req, res) => {
         // Calculate hash only once
         const hash = xxHash32(JSON.stringify({ username: user.username, customization: user.customization }), 0).toString();
 
-        if (type === 'sprite' && user.customizationHash === hash) {
-            const params = getParams(username);
+        // Check if current hash matches stored hash (avatar is up to date)
+        if (user.customizationHash === hash) {
+            // Try to return existing avatar based on type
+            if (type === 'sprite') {
+                const params = getParams(username);
+                const exists = await checkObjectExists(params);
+                
+                if (exists) {
+                    const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                    return res.status(307).redirect(signedUrl);
+                }
+                console.log(`Sprite file not found on DO for user ${username}, will check queue...`);
+            } else if (type === 'thumbnail') {
+                const params = getParamsThumbnail(username);
+                const exists = await checkObjectExists(params);
+                
+                if (exists) {
+                    const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                    return res.status(307).redirect(signedUrl);
+                }
+                console.log(`Thumbnail file not found on DO for user ${username}, will check queue...`);
+            } else {
+                // Check memory cache first
+                const cachedAvatar = avatarCache.get(hash);
+                if (cachedAvatar) {
+                    return res.status(200).send(cachedAvatar);
+                }
+
+                // Check DO storage
+                const params = getParamsAvatar(username);
+                const exists = await checkObjectExists(params);
+                
+                if (exists) {
+                    const signedUrl = await s3.getSignedUrlPromise('getObject', params);
+                    return res.status(307).redirect(signedUrl);
+                }
+                console.log(`Avatar file not found on DO for user ${username}, will check queue...`);
+            }
+        }
+
+        // Avatar needs to be generated - check queue status
+        const queueStatus = await avatarQueue.add({
+            type,
+            username,
+            user,
+            hash,
+            execute: async () => {
+                return await createAvatarThumbnail(user, hash, type, null);
+            }
+        });
+
+        // Handle queue status
+        if (queueStatus.status === 'queue_full_but_added') {
+            console.log(`Queue full for ${username}, returning old avatar but still queued for regeneration`);
             
-            // Check if file exists on DigitalOcean
+            // Return old avatar even if hash doesn't match
+            let params;
+            if (type === 'sprite') {
+                params = getParams(username);
+            } else if (type === 'thumbnail') {
+                params = getParamsThumbnail(username);
+            } else {
+                params = getParamsAvatar(username);
+            }
+
             const exists = await checkObjectExists(params);
-            
             if (exists) {
                 const signedUrl = await s3.getSignedUrlPromise('getObject', params);
                 return res.status(307).redirect(signedUrl);
             }
-            // If doesn't exist, fall through to regenerate
-            console.log(`Sprite file not found on DO for user ${username}, regenerating...`);
+
+            // No old avatar available, but still queued - return processing status
+            return res.status(202).json({
+                status: 'processing',
+                message: 'Avatar generation queued (queue is full, no old avatar available)',
+                position: queueStatus.position,
+                queueStatus: avatarQueue.getStatus(),
+                retryAfter: 10 // Suggest longer retry time due to full queue
+            });
         }
 
-        if (type === 'thumbnail' && user.customizationHash === hash) {
-            const params = getParamsThumbnail(username);
-            
-            // Check if file exists on DigitalOcean
-            const exists = await checkObjectExists(params);
-            
-            if (exists) {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', params);
-                return res.status(307).redirect(signedUrl);
-            }
-            // If doesn't exist, fall through to regenerate
-            console.log(`Thumbnail file not found on DO for user ${username}, regenerating...`);
-        }
-
-        if (type !== 'sprite' && type !== 'thumbnail') {
-            // First check memory cache using username as key
-            const cachedAvatar = avatarCache.get(hash);
-            if (cachedAvatar) {
-                return res.status(200).send(cachedAvatar);
+        if (queueStatus.status === 'processing') {
+            // Wait for the processing to complete
+            try {
+                const result = await queueStatus.promise;
+                return sendAvatarResponse(type, username, result, res);
+            } catch (error) {
+                console.error('Error waiting for avatar generation:', error);
+                return res.status(500).send('Error generating avatar');
             }
         }
 
-        if (type !== 'sprite' && type !== 'thumbnail' && user.customizationHash === hash) {
-            const params = getParamsAvatar(username);
-            
-            // Check if file exists on DigitalOcean
-            const exists = await checkObjectExists(params);
-            
-            if (exists) {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', params);
-                return res.status(307).redirect(signedUrl);
-            }
-            // If doesn't exist, fall through to regenerate
-            console.log(`Avatar file not found on DO for user ${username}, regenerating...`);
-        }
+        // Item is queued, return a processing response
+        res.status(202).json({
+            status: 'processing',
+            message: 'Avatar generation queued',
+            position: queueStatus.position,
+            queueStatus: avatarQueue.getStatus(),
+            retryAfter: 5 // Suggest retry after 5 seconds
+        });
 
-        // Generate avatar if needed (file doesn't exist or hash mismatch)
-        const generatedAvatar = await createAvatarThumbnail(user, hash, type, res);
-        
-        if (type !== 'sprite' && type !== 'thumbnail') {
-            // Send response immediately
-            return res.status(200).send(generatedAvatar);
-        }
-    } 
-    catch (error) {
+    } catch (error) {
         console.error('Avatar generation error:', error);
         res.status(500).send('Error generating avatar');
+    }
+};
+
+// Helper function to send avatar response based on type
+const sendAvatarResponse = async (type, username, generatedAvatar, res) => {
+    if (!res) return; // Called from queue, no response object
+
+    try {
+        if (type === 'sprite') {
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(username));
+            return res.status(307).redirect(signedUrl);
+        } else if (type === 'thumbnail') {
+            const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsThumbnail(username));
+            return res.status(307).redirect(signedUrl);
+        } else {
+            if (generatedAvatar) {
+                return res.status(200).send(generatedAvatar);
+            } else {
+                const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(username));
+                return res.status(307).redirect(signedUrl);
+            }
+        }
+    } catch (error) {
+        console.error('Error sending avatar response:', error);
+        if (res && !res.headersSent) {
+            res.status(500).send('Error retrieving avatar');
+        }
     }
 };
 
@@ -166,7 +341,7 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             let skinTone = user.customization.skinTone ?? 0
             let base = user.customization.isMale ? `male_${skinTone}.png` : `female_${skinTone}.png`
             
-            const baseDir = path.join(process.cwd(), '_bases', base)//path.join(import.meta.dirname, '../../_bases', base)
+            const baseDir = path.join(process.cwd(), '_bases', base)
             base = await fs.readFile(baseDir)
 
             // Load all customization images
@@ -227,12 +402,11 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
             const spriteSheet = await generateFullSpriteSheet(loadedImages, shoesBehindPants, hairInfrontTop)
 
             // Generate front-facing avatar for thumbnail
-            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850) //await generateDirectionalAvatar(0, loadedImages, shoesBehindPants, hairInfrontTop)
+            const frontFacingAvatar = await cropImage(spriteSheet, 0, 0, 425, 850)
             const frontFacingBuffer = await sharp(frontFacingAvatar).webp({ quality: 95 }).toBuffer()
 
-            // Update cache and resolve with front-facing avatar
+            // Update cache
             avatarCache.set(hash, frontFacingBuffer)
-            resolve(frontFacingBuffer)
 
             // Generate thumbnail from sprite sheet
             const thumbnail = await cropImage(spriteSheet, 103, 42, 218, 218)
@@ -255,17 +429,12 @@ const createAvatarThumbnail = async (user, hash, type, res) => {
                 { timestamps: false }
             ).catch(console.error)
 
-            if (type === 'sprite') {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', getParams(user.username))
-                return res.status(307).redirect(signedUrl)
-            }
-            else if (type === 'thumbnail') {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsThumbnail(user.username))
-                return res.status(307).redirect(signedUrl)
-            }
-            else {
-                const signedUrl = await s3.getSignedUrlPromise('getObject', getParamsAvatar(user.username))
-                return res.status(307).redirect(signedUrl)
+            // Resolve with the front-facing buffer for immediate response
+            resolve(frontFacingBuffer);
+
+            // If response object was provided, send appropriate response
+            if (res) {
+                await sendAvatarResponse(type, user.username, frontFacingBuffer, res);
             }
         }
         catch (error) {
@@ -279,7 +448,7 @@ const memoryCache = new LRUCache({
     max: 20,
 })
 
-const CACHE_DIR = path.join(process.cwd(), 'cache');//path.join(import.meta.dirname, '../../cache');
+const CACHE_DIR = path.join(process.cwd(), 'cache');
 (async () => {
     await fs.mkdir(CACHE_DIR, { recursive: true })
 })()
@@ -468,7 +637,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
         const tattooCtx = tattooCanvas.getContext('2d')
         
         for (const [key, tattoo] of Object.entries(tattooLayers)) {
-            if (key.startsWith('tattoos') && tattoo) {
+            if (key.startsWith('tattoo_') && tattoo) {
                 tattooCtx.drawImage(tattoo, 0, 0)
             }
         }
@@ -485,7 +654,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
 
     // Remove individual tattoo layers to prevent double-drawing
     Object.keys(layers).forEach(key => {
-        if (key.startsWith('tattoos') && key !== 'tattoos') {
+        if (key.startsWith('tattoo_') && key !== 'tattoos') {
             delete layers[key]
         }
     })
@@ -518,7 +687,7 @@ async function cropImage(sourceImage, x, y, width, height) {
 
 // Batch process avatar deletion for old files
 const cleanupOldAvatars = async () => {
-    const avatarsDir = path.join(process.cwd(), 'avatars')//path.join(import.meta.dirname, '../../avatars')
+    const avatarsDir = path.join(process.cwd(), 'avatars')
     const files = await fs.readdir(avatarsDir)
     const now = Date.now()
     const maxAge = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -565,7 +734,7 @@ const clearAllCaches = async () => {
 
         // Clear disk cache
         try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
+            const CACHE_DIR = path.join(process.cwd(), 'cache')
             const files = await fs.readdir(CACHE_DIR)
             
             await Promise.all(files.map(async (file) => {
@@ -593,7 +762,7 @@ const clearAllCaches = async () => {
 
         // Create fresh cache directory
         try {
-            const CACHE_DIR = path.join(process.cwd(), 'cache')//path.join(import.meta.dirname, '../../cache')
+            const CACHE_DIR = path.join(process.cwd(), 'cache')
             await fs.mkdir(CACHE_DIR, { recursive: true })
         } catch (error) {
             results.errors.push({
@@ -637,4 +806,14 @@ const handleCacheClear = async (req, res) => {
     }
 }
 
-export default { getAvatar, clearAllCaches, handleCacheClear }
+/**
+ * Get queue status endpoint
+ */
+const getQueueStatus = async (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        queue: avatarQueue.getStatus()
+    });
+}
+
+export default { getAvatar, clearAllCaches, handleCacheClear, getQueueStatus }
