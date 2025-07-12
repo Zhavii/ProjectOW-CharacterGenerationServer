@@ -240,7 +240,8 @@ const getAvatar = async (req, res) => {
             }
         }
 
-        // Avatar needs to be generated - check queue status
+        // Avatar needs to be generated - add to queue
+        // If queue has more than 2 items, we'll return old avatar but still queue for regeneration
         const queueStatus = await avatarQueue.add({
             type,
             username,
@@ -637,7 +638,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
         const tattooCtx = tattooCanvas.getContext('2d')
         
         for (const [key, tattoo] of Object.entries(tattooLayers)) {
-            if (key.startsWith('tattoo_') && tattoo) {
+            if (key.startsWith('tattoos') && tattoo) {
                 tattooCtx.drawImage(tattoo, 0, 0)
             }
         }
@@ -654,7 +655,7 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
 
     // Remove individual tattoo layers to prevent double-drawing
     Object.keys(layers).forEach(key => {
-        if (key.startsWith('tattoo_') && key !== 'tattoos') {
+        if (key.startsWith('tattoos') && key !== 'tattoos') {
             delete layers[key]
         }
     })
