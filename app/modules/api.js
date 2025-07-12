@@ -632,37 +632,9 @@ const generateFullSpriteSheet = async (allLayers, shoesBehindPants, hairInfrontT
     const canvas = createCanvas(2550, 850)
     const ctx = canvas.getContext('2d')
 
-    // Combine all tattoos into a single layer for simplicity
-    const combineTattoos = async (tattooLayers) => {
-        const tattooCanvas = createCanvas(2550, 850)
-        const tattooCtx = tattooCanvas.getContext('2d')
-        
-        for (const [key, tattoo] of Object.entries(tattooLayers)) {
-            if (key.startsWith('tattoos') && tattoo) {
-                tattooCtx.drawImage(tattoo, 0, 0)
-            }
-        }
-        
-        return await loadImage(tattooCanvas.toBuffer())
-    }
-
-    // Create layers object with combined tattoos
-    const tattoos = await combineTattoos(allLayers)
-    const layers = {
-        ...allLayers,
-        tattoos,
-    }
-
-    // Remove individual tattoo layers to prevent double-drawing
-    Object.keys(layers).forEach(key => {
-        if (key.startsWith('tattoos') && key !== 'tattoos') {
-            delete layers[key]
-        }
-    })
-
     // Generate each direction
     for (let direction = 0; direction < 6; direction++) {
-        const directionCanvas = await generateDirectionalAvatar(direction, layers, shoesBehindPants, hairInfrontTop)
+        const directionCanvas = await generateDirectionalAvatar(direction, allLayers, shoesBehindPants, hairInfrontTop)
         ctx.drawImage(
             await loadImage(directionCanvas),
             direction * 425, 0  // Place each direction in its correct position
